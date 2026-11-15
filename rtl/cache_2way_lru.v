@@ -172,8 +172,10 @@ module cache_2way_lru #(
                 end
             end
         end else begin
-            // Increment total runtime cycle counter
-            cycle_count <= cycle_count + 1;
+            // Increment cycle counter while servicing active request
+            if (state != STATE_IDLE || cpu_req) begin
+                cycle_count <= cycle_count + 1;
+            end
             cpu_ready   <= 1'b0; // Default pulse low
 
             case (state)
