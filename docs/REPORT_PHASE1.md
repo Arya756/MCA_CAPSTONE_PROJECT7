@@ -136,6 +136,32 @@ Insert the experimental results from `results/results.csv`:
 | `mixed_rw` | 2-Way LRU | 300 | 244 | 56 | 81.33% | 1,499 |
 | `mixed_rw` | Direct-Mapped | 300 | 244 | 56 | 81.33% | 1,499 |
 
+### A. Memory Read Latency Sensitivity Study (RD_LAT = 4, 8, 16 Cycles)
+*Contributed by Member 3 (Direct-Mapped Baseline & Memory Model)*
+
+To evaluate cache resilience against varying memory subsystem delays, a full regression sweep was executed with read latency parameters $RD\_LAT \in \{4, 8, 16\}$ clock cycles. The table below illustrates the cycle impact across all 7 benchmark workloads (consolidated in `results/latency_sensitivity.csv`):
+
+| Trace Name | Architecture | Accesses | Misses | Hit Rate | Cycles (RD_LAT=4) | Cycles (RD_LAT=8) | Cycles (RD_LAT=16) | Delta (8 → 4) | Delta (8 → 16) |
+|---|---|---|---|---|---|---|---|---|---|
+| `seq_stream` | 2-Way LRU | 256 | 64 | 75.00% | 1,024 | 1,280 | 1,792 | -256 (-20.0%) | +512 (+40.0%) |
+| `seq_stream` | Direct-Mapped | 256 | 64 | 75.00% | 1,024 | 1,280 | 1,792 | -256 (-20.0%) | +512 (+40.0%) |
+| `small_loop` | 2-Way LRU | 640 | 16 | 97.50% | 1,408 | 1,472 | 1,600 | -64 (-4.3%) | +128 (+8.7%) |
+| `small_loop` | Direct-Mapped | 640 | 16 | 97.50% | 1,408 | 1,472 | 1,600 | -64 (-4.3%) | +128 (+8.7%) |
+| `pingpong` | 2-Way LRU | 200 | 2 | 99.00% | 416 | 424 | 440 | -8 (-1.9%) | +16 (+3.8%) |
+| `pingpong` | Direct-Mapped | 200 | 200 | 0.00% | 2,000 | 2,800 | 4,400 | -800 (-28.6%) | +1,600 (+57.1%) |
+| `cyclic3` | 2-Way LRU | 300 | 300 | 0.00% | 3,000 | 4,200 | 6,600 | -1,200 (-28.6%) | +2,400 (+57.1%) |
+| `cyclic3` | Direct-Mapped | 300 | 300 | 0.00% | 3,000 | 4,200 | 6,600 | -1,200 (-28.6%) | +2,400 (+57.1%) |
+| `strided` | 2-Way LRU | 256 | 8 | 96.88% | 576 | 608 | 672 | -32 (-5.3%) | +64 (+10.5%) |
+| `strided` | Direct-Mapped | 256 | 8 | 96.88% | 576 | 608 | 672 | -32 (-5.3%) | +64 (+10.5%) |
+| `random` | 2-Way LRU | 300 | 278 | 7.33% | 2,824 | 3,936 | 6,160 | -1,112 (-28.3%) | +2,224 (+56.5%) |
+| `random` | Direct-Mapped | 300 | 282 | 6.00% | 2,856 | 3,984 | 6,240 | -1,128 (-28.3%) | +2,256 (+56.6%) |
+| `mixed_rw` | 2-Way LRU | 300 | 56 | 81.33% | 1,371 | 1,499 | 1,755 | -128 (-8.5%) | +256 (+17.1%) |
+| `mixed_rw` | Direct-Mapped | 300 | 56 | 81.33% | 1,371 | 1,499 | 1,755 | -128 (-8.5%) | +256 (+17.1%) |
+
+**Key Architectural Insights from Latency Sensitivity:**
+1. **Linear Scaling with Miss Penalty:** The cycle variance across memory latency settings follows the exact analytical formula $\Delta \text{Cycles} = \Delta RD\_LAT \times \text{Read Misses}$. Shifting $RD\_LAT$ from 8 to 4 decreases execution time by exactly 4 cycles per miss, while increasing $RD\_LAT$ to 16 adds 8 cycles per miss.
+2. **Associativity as a Latency Buffer:** On conflict-prone traces such as `pingpong`, the 2-way associative cache experiences only 2 cold misses, causing its total execution time to increase by a mere 3.8% (424 to 440 cycles) when memory latency doubles. In stark contrast, the direct-mapped cache suffers 200 conflict misses, resulting in a 57.1% cycle increase (2,800 to 4,400 cycles). This demonstrates that set associativity effectively shields the CPU from off-chip memory latency bottlenecks.
+
 *TODO: Member 5:*  
 - Add comparative bar charts (`hit_rate.png` and `cycles.png`).
 - Add Yosys synthesis resource utilization table (cell count, flip-flops, wires).
