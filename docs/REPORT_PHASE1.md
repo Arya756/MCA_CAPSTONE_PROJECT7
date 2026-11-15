@@ -101,20 +101,20 @@ Insert the experimental results from `results/results.csv`:
 
 | Trace Name | Design | Total Accesses | Hits | Misses | Hit Rate (%) | Total Cycles |
 |---|---|---|---|---|---|---|
-| `seq_stream` | 2-Way LRU | 256 | 192 | 64 | 75.00% | 3,073 |
-| `seq_stream` | Direct-Mapped | 256 | 192 | 64 | 75.00% | 3,073 |
-| `small_loop` | 2-Way LRU | 640 | 624 | 16 | 97.50% | 4,225 |
-| `small_loop` | Direct-Mapped | 640 | 624 | 16 | 97.50% | 4,225 |
-| `pingpong` | 2-Way LRU | 200 | 198 | 2 | 99.00% | 3,625 |
-| `pingpong` | Direct-Mapped | 200 | 0 | 200 | 0.00% | 3,625 |
-| `cyclic3` | 2-Way LRU | 300 | 0 | 300 | 0.00% | 9,001 |
-| `cyclic3` | Direct-Mapped | 300 | 0 | 300 | 0.00% | 9,001 |
-| `strided` | 2-Way LRU | 256 | 248 | 8 | 96.88% | 1,729 |
-| `strided` | Direct-Mapped | 256 | 248 | 8 | 96.88% | 1,729 |
-| `random` | 2-Way LRU | 300 | 22 | 278 | 7.33% | 8,521 |
-| `random` | Direct-Mapped | 300 | 18 | 282 | 6.00% | 8,521 |
-| `mixed_rw` | 2-Way LRU | 300 | 244 | 56 | 81.33% | 3,599 |
-| `mixed_rw` | Direct-Mapped | 300 | 244 | 56 | 81.33% | 3,599 |
+| `seq_stream` | 2-Way LRU | 256 | 192 | 64 | 75.00% | 1,280 |
+| `seq_stream` | Direct-Mapped | 256 | 192 | 64 | 75.00% | 1,280 |
+| `small_loop` | 2-Way LRU | 640 | 624 | 16 | 97.50% | 1,472 |
+| `small_loop` | Direct-Mapped | 640 | 624 | 16 | 97.50% | 1,472 |
+| `pingpong` | 2-Way LRU | 200 | 198 | 2 | 99.00% | 424 |
+| `pingpong` | Direct-Mapped | 200 | 0 | 200 | 0.00% | 2,800 |
+| `cyclic3` | 2-Way LRU | 300 | 0 | 300 | 0.00% | 4,200 |
+| `cyclic3` | Direct-Mapped | 300 | 0 | 300 | 0.00% | 4,200 |
+| `strided` | 2-Way LRU | 256 | 248 | 8 | 96.88% | 608 |
+| `strided` | Direct-Mapped | 256 | 248 | 8 | 96.88% | 608 |
+| `random` | 2-Way LRU | 300 | 22 | 278 | 7.33% | 3,936 |
+| `random` | Direct-Mapped | 300 | 18 | 282 | 6.00% | 3,984 |
+| `mixed_rw` | 2-Way LRU | 300 | 244 | 56 | 81.33% | 1,499 |
+| `mixed_rw` | Direct-Mapped | 300 | 244 | 56 | 81.33% | 1,499 |
 
 *TODO: Member 5:*  
 - Add comparative bar charts (`hit_rate.png` and `cycles.png`).

@@ -2,11 +2,14 @@
 // Testbench:    tb_compare
 // Project:      Project 7 - 2-Way Set-Associative vs Direct-Mapped Cache
 // Owner:        Member 4 (Traces, Comparison Testbench, Scripts)
-// Description:  Executes access traces concurrently through BOTH cache_2way_lru
-//               and cache_direct against an architectural golden memory model.
-//               - Validates functional data correctness (counts mismatches).
-//               - Compares hits, misses, hit rate (%), and cycle counts.
-//               - Appends rows to results/results.csv for performance evaluation.
+// Description:  Executes access traces through BOTH cache_2way_lru and
+//               cache_direct in separate, independent passes against an
+//               architectural golden memory model.
+//               - Independent cycle timing measured per access from request
+//                 to cpu_ready, accumulated per design without interference.
+//               - Validates data correctness against golden memory (0 mismatches).
+//               - Compares hits, misses, hit rates, and total cycle counts.
+//               - Appends benchmark rows to results/results.csv.
 // ============================================================================
 
 `timescale 1ns / 1ps
@@ -14,7 +17,8 @@
 module tb_compare;
 
     reg clk;
-    reg rst;
+    reg rst_2w;
+    reg rst_dir;
 
     // ------------------------------------------------------------------------
     // Signals for 2-Way Set-Associative Cache
@@ -64,7 +68,20 @@ module tb_compare;
     reg [31:0] golden_mem [0:4095];
     integer total_mismatches;
     integer trace_mismatches;
-    integer trace_accesses;
+
+    // Per-trace access, hit, miss, and accumulated cycle counters
+    integer trace_accesses_2w;
+    integer trace_accesses_dir;
+    integer saved_hits_2w;
+    integer saved_misses_2w;
+    integer saved_hits_dir;
+    integer saved_misses_dir;
+    integer acc_cycles_2w;
+    integer acc_cycles_dir;
+
+    // Diagnostics for latency sanity checks
+    integer measured_read_hit_lat;
+    integer measured_read_miss_lat;
 
     // ------------------------------------------------------------------------
     // DUT Instantiations
@@ -77,7 +94,7 @@ module tb_compare;
         .NUM_WAYS(2)
     ) dut_2way (
         .clk(clk),
-        .rst(rst),
+        .rst(rst_2w),
         .cpu_req(cpu_req_2w),
         .cpu_we(cpu_we_2w),
         .cpu_addr(cpu_addr_2w),
@@ -101,7 +118,7 @@ module tb_compare;
         .MEM_WORDS(4096)
     ) mem_2way_inst (
         .clk(clk),
-        .rst(rst),
+        .rst(rst_2w),
         .mem_req(mem_req_2w),
         .mem_we(mem_we_2w),
         .mem_addr(mem_addr_2w),
@@ -117,7 +134,7 @@ module tb_compare;
         .BLOCK_SIZE(16)
     ) dut_direct (
         .clk(clk),
-        .rst(rst),
+        .rst(rst_dir),
         .cpu_req(cpu_req_dir),
         .cpu_we(cpu_we_dir),
         .cpu_addr(cpu_addr_dir),
@@ -141,7 +158,7 @@ module tb_compare;
         .MEM_WORDS(4096)
     ) mem_direct_inst (
         .clk(clk),
-        .rst(rst),
+        .rst(rst_dir),
         .mem_req(mem_req_dir),
         .mem_we(mem_we_dir),
         .mem_addr(mem_addr_dir),
@@ -154,106 +171,113 @@ module tb_compare;
     always #5 clk = ~clk;
 
     // ------------------------------------------------------------------------
-    // Reset and Memory Initialization
+    // Initialize Golden Memory and Main Memory Backing Arrays
     // ------------------------------------------------------------------------
-    task reset_system;
+    task init_memories;
         integer i;
         begin
-            @(posedge clk);
-            rst          = 1'b1;
-            cpu_req_2w   = 1'b0;
-            cpu_we_2w    = 1'b0;
-            cpu_addr_2w  = 32'h0;
-            cpu_wdata_2w = 32'h0;
-            cpu_req_dir   = 1'b0;
-            cpu_we_dir    = 1'b0;
-            cpu_addr_dir  = 32'h0;
-            cpu_wdata_dir = 32'h0;
-
             for (i = 0; i < 4096; i = i + 1) begin
                 golden_mem[i]               = 32'h1000_0000 + (i * 4);
                 mem_2way_inst.mem_array[i]   = 32'h1000_0000 + (i * 4);
                 mem_direct_inst.mem_array[i] = 32'h1000_0000 + (i * 4);
             end
-
-            #20;
-            @(posedge clk);
-            rst = 1'b0;
-            #20;
         end
     endtask
 
     // ------------------------------------------------------------------------
-    // Task to run one memory transaction through both caches
+    // Execute a single transaction on 2-Way Cache
     // ------------------------------------------------------------------------
-    task execute_transaction;
+    task execute_transaction_2w;
         input        is_write;
         input [31:0] addr;
         input [31:0] wdata;
-        reg [31:0] golden_val;
+        reg   [31:0] golden_val;
+        integer      lat;
+        reg   [31:0] prev_hits;
         begin
-            trace_accesses = trace_accesses + 1;
+            trace_accesses_2w = trace_accesses_2w + 1;
+            prev_hits = hit_count_2w;
+            lat = 0;
 
+            @(posedge clk);
+            cpu_addr_2w  = addr;
+            cpu_wdata_2w = wdata;
+            cpu_we_2w    = is_write;
+            cpu_req_2w   = 1'b1;
+
+            // Count cycles until cpu_ready_2w is asserted
+            while (!cpu_ready_2w) begin
+                @(posedge clk);
+                lat = lat + 1;
+            end
+
+            // cpu_ready_2w is active
             if (is_write) begin
                 golden_mem[addr[13:2]] = wdata;
-
-                // 2-Way Cache Write
-                @(posedge clk);
-                cpu_addr_2w  = addr;
-                cpu_wdata_2w = wdata;
-                cpu_we_2w    = 1'b1;
-                cpu_req_2w   = 1'b1;
-                @(posedge clk);
-                while (!cpu_ready_2w) @(posedge clk);
-                cpu_req_2w   = 1'b0;
-
-                // Direct-Mapped Cache Write
-                @(posedge clk);
-                cpu_addr_dir  = addr;
-                cpu_wdata_dir = wdata;
-                cpu_we_dir    = 1'b1;
-                cpu_req_dir   = 1'b1;
-                @(posedge clk);
-                while (!cpu_ready_dir) @(posedge clk);
-                cpu_req_dir   = 1'b0;
             end else begin
                 golden_val = golden_mem[addr[13:2]];
-
-                // 2-Way Cache Read
-                @(posedge clk);
-                cpu_addr_2w = addr;
-                cpu_we_2w   = 1'b0;
-                cpu_req_2w  = 1'b1;
-                @(posedge clk);
-                while (!cpu_ready_2w) @(posedge clk);
                 if (cpu_rdata_2w !== golden_val) begin
-                    $display("ERROR [2-Way]: Mismatch at addr 0x%08h! Expected 0x%08h, got 0x%08h",
+                    $display("ERROR [2-Way]: Data mismatch at addr 0x%08h! Expected 0x%08h, got 0x%08h",
                              addr, golden_val, cpu_rdata_2w);
                     trace_mismatches = trace_mismatches + 1;
                     total_mismatches = total_mismatches + 1;
                 end
-                cpu_req_2w = 1'b0;
-
-                // Direct-Mapped Cache Read
-                @(posedge clk);
-                cpu_addr_dir = addr;
-                cpu_we_dir   = 1'b0;
-                cpu_req_dir  = 1'b1;
-                @(posedge clk);
-                while (!cpu_ready_dir) @(posedge clk);
-                if (cpu_rdata_dir !== golden_val) begin
-                    $display("ERROR [Direct]: Mismatch at addr 0x%08h! Expected 0x%08h, got 0x%08h",
-                             addr, golden_val, cpu_rdata_dir);
-                    trace_mismatches = trace_mismatches + 1;
-                    total_mismatches = total_mismatches + 1;
-                end
-                cpu_req_dir = 1'b0;
+                if (hit_count_2w > prev_hits)
+                    measured_read_hit_lat = lat;
+                else
+                    measured_read_miss_lat = lat;
             end
+
+            cpu_req_2w    = 1'b0;
+            acc_cycles_2w = acc_cycles_2w + lat;
         end
     endtask
 
     // ------------------------------------------------------------------------
-    // Task to run an entire trace file
+    // Execute a single transaction on Direct-Mapped Cache
+    // ------------------------------------------------------------------------
+    task execute_transaction_dir;
+        input        is_write;
+        input [31:0] addr;
+        input [31:0] wdata;
+        reg   [31:0] golden_val;
+        integer      lat;
+        begin
+            trace_accesses_dir = trace_accesses_dir + 1;
+            lat = 0;
+
+            @(posedge clk);
+            cpu_addr_dir  = addr;
+            cpu_wdata_dir = wdata;
+            cpu_we_dir    = is_write;
+            cpu_req_dir   = 1'b1;
+
+            // Count cycles until cpu_ready_dir is asserted
+            while (!cpu_ready_dir) begin
+                @(posedge clk);
+                lat = lat + 1;
+            end
+
+            // cpu_ready_dir is active
+            if (is_write) begin
+                golden_mem[addr[13:2]] = wdata;
+            end else begin
+                golden_val = golden_mem[addr[13:2]];
+                if (cpu_rdata_dir !== golden_val) begin
+                    $display("ERROR [Direct]: Data mismatch at addr 0x%08h! Expected 0x%08h, got 0x%08h",
+                             addr, golden_val, cpu_rdata_dir);
+                    trace_mismatches = trace_mismatches + 1;
+                    total_mismatches = total_mismatches + 1;
+                end
+            end
+
+            cpu_req_dir    = 1'b0;
+            acc_cycles_dir = acc_cycles_dir + lat;
+        end
+    endtask
+
+    // ------------------------------------------------------------------------
+    // Run Trace through BOTH Designs in Independent Sequential Passes
     // ------------------------------------------------------------------------
     task run_trace_file;
         input [1023:0] trace_path;
@@ -266,75 +290,143 @@ module tb_compare;
         real           hit_rate_2w;
         real           hit_rate_dir;
         begin
-            trace_mismatches = 0;
-            trace_accesses   = 0;
-            reset_system();
+            $display("\n============================================================");
+            $display("RUNNING TRACE: %0s", trace_name);
+            $display("============================================================");
+
+            // ----------------------------------------------------------------
+            // PASS 1: 2-Way Set-Associative Cache
+            // ----------------------------------------------------------------
+            trace_accesses_2w = 0;
+            acc_cycles_2w     = 0;
+            init_memories();
+
+            @(posedge clk);
+            rst_2w     = 1'b1;
+            cpu_req_2w = 1'b0;
+            cpu_we_2w  = 1'b0;
+            #20;
+            @(posedge clk);
+            rst_2w = 1'b0;
+            #20;
 
             file_fd = $fopen(trace_path, "r");
             if (file_fd == 0) begin
                 $display("ERROR: Failed to open trace file: %0s", trace_path);
                 total_mismatches = total_mismatches + 1;
             end else begin
-                $display("\n============================================================");
-                $display("RUNNING TRACE: %0s", trace_name);
-                $display("============================================================");
-
                 while ($fgets(line_buf, file_fd)) begin
-                    // Skip comments and empty lines
                     if (line_buf[8*1024:8*1024-7] != "#" && line_buf[8*1024:8*1024-7] != "\n") begin
                         scan_status = $sscanf(line_buf, "%s %h %h", op_str, addr_val, wdata_val);
                         if (scan_status >= 2) begin
-                            if (op_str == "R") begin
-                                execute_transaction(1'b0, addr_val, 32'h0);
-                            end else if (op_str == "W") begin
-                                execute_transaction(1'b1, addr_val, wdata_val);
-                            end
+                            if (op_str == "R")
+                                execute_transaction_2w(1'b0, addr_val, 32'h0);
+                            else if (op_str == "W")
+                                execute_transaction_2w(1'b1, addr_val, wdata_val);
                         end
                     end
                 end
                 $fclose(file_fd);
+            end
 
-                // Compute hit rates
-                if (trace_accesses > 0) begin
-                    hit_rate_2w  = (hit_count_2w * 100.0) / trace_accesses;
-                    hit_rate_dir = (hit_count_dir * 100.0) / trace_accesses;
-                end else begin
-                    hit_rate_2w  = 0.0;
-                    hit_rate_dir = 0.0;
+            saved_hits_2w   = hit_count_2w;
+            saved_misses_2w = miss_count_2w;
+
+            // ----------------------------------------------------------------
+            // PASS 2: Direct-Mapped Baseline Cache
+            // ----------------------------------------------------------------
+            trace_accesses_dir = 0;
+            acc_cycles_dir     = 0;
+            init_memories();
+
+            @(posedge clk);
+            rst_dir     = 1'b1;
+            cpu_req_dir = 1'b0;
+            cpu_we_dir  = 1'b0;
+            #20;
+            @(posedge clk);
+            rst_dir = 1'b0;
+            #20;
+
+            file_fd = $fopen(trace_path, "r");
+            if (file_fd != 0) begin
+                while ($fgets(line_buf, file_fd)) begin
+                    if (line_buf[8*1024:8*1024-7] != "#" && line_buf[8*1024:8*1024-7] != "\n") begin
+                        scan_status = $sscanf(line_buf, "%s %h %h", op_str, addr_val, wdata_val);
+                        if (scan_status >= 2) begin
+                            if (op_str == "R")
+                                execute_transaction_dir(1'b0, addr_val, 32'h0);
+                            else if (op_str == "W")
+                                execute_transaction_dir(1'b1, addr_val, wdata_val);
+                        end
+                    end
                 end
+                $fclose(file_fd);
+            end
 
-                $display("RESULTS for %0s (Total Accesses: %0d, Mismatches: %0d):",
-                         trace_name, trace_accesses, trace_mismatches);
-                $display("  [2-Way LRU]   Hits: %4d | Misses: %4d | Hit Rate: %6.2f%% | Cycles: %6d",
-                         hit_count_2w, miss_count_2w, hit_rate_2w, cycle_count_2w);
-                $display("  [Direct-Map]  Hits: %4d | Misses: %4d | Hit Rate: %6.2f%% | Cycles: %6d",
-                         hit_count_dir, miss_count_dir, hit_rate_dir, cycle_count_dir);
+            saved_hits_dir   = hit_count_dir;
+            saved_misses_dir = miss_count_dir;
 
-                // Append rows to results/results.csv
-                csv_fd = $fopen("results/results.csv", "a");
-                if (csv_fd != 0) begin
-                    $fdisplay(csv_fd, "%0s,2way,%0d,%0d,%0d,%0.2f,%0d",
-                              trace_name, trace_accesses, hit_count_2w, miss_count_2w, hit_rate_2w, cycle_count_2w);
-                    $fdisplay(csv_fd, "%0s,direct,%0d,%0d,%0d,%0.2f,%0d",
-                              trace_name, trace_accesses, hit_count_dir, miss_count_dir, hit_rate_dir, cycle_count_dir);
-                    $fclose(csv_fd);
-                end
+            // ----------------------------------------------------------------
+            // Compute Hit Rates and Display Results
+            // ----------------------------------------------------------------
+            hit_rate_2w  = (trace_accesses_2w > 0) ?  (saved_hits_2w * 100.0) / trace_accesses_2w  : 0.0;
+            hit_rate_dir = (trace_accesses_dir > 0) ? (saved_hits_dir * 100.0) / trace_accesses_dir : 0.0;
+
+            $display("RESULTS for %0s (Total Accesses: %0d, Mismatches: %0d):",
+                     trace_name, trace_accesses_2w, trace_mismatches);
+            $display("  [2-Way LRU]   Hits: %4d | Misses: %4d | Hit Rate: %6.2f%% | Cycles: %6d",
+                     saved_hits_2w, saved_misses_2w, hit_rate_2w, acc_cycles_2w);
+            $display("  [Direct-Map]  Hits: %4d | Misses: %4d | Hit Rate: %6.2f%% | Cycles: %6d",
+                     saved_hits_dir, saved_misses_dir, hit_rate_dir, acc_cycles_dir);
+
+            // Special Sanity Check Print for seq_stream
+            if (trace_name == "seq_stream") begin
+                $display("  --> [Sanity Check: seq_stream]");
+                $display("      Measured Read Hit Cost:  %0d cycles", measured_read_hit_lat);
+                $display("      Measured Read Miss Cost: %0d cycles", measured_read_miss_lat);
+                $display("      Formula: Total Cycles = (Hits * %0d) + (Misses * %0d)",
+                         measured_read_hit_lat, measured_read_miss_lat);
+                $display("      2-Way:  %0d*%0d + %0d*%0d = %0d cycles (matches %0d: %s)",
+                         saved_hits_2w, measured_read_hit_lat, saved_misses_2w, measured_read_miss_lat,
+                         (saved_hits_2w*measured_read_hit_lat + saved_misses_2w*measured_read_miss_lat),
+                         acc_cycles_2w,
+                         (acc_cycles_2w == (saved_hits_2w*measured_read_hit_lat + saved_misses_2w*measured_read_miss_lat)) ? "EXACT" : "MISMATCH");
+                $display("      Direct: %0d*%0d + %0d*%0d = %0d cycles (matches %0d: %s)",
+                         saved_hits_dir, measured_read_hit_lat, saved_misses_dir, measured_read_miss_lat,
+                         (saved_hits_dir*measured_read_hit_lat + saved_misses_dir*measured_read_miss_lat),
+                         acc_cycles_dir,
+                         (acc_cycles_dir == (saved_hits_dir*measured_read_hit_lat + saved_misses_dir*measured_read_miss_lat)) ? "EXACT" : "MISMATCH");
+            end
+
+            // Append rows to results/results.csv
+            csv_fd = $fopen("results/results.csv", "a");
+            if (csv_fd != 0) begin
+                $fdisplay(csv_fd, "%0s,2way,%0d,%0d,%0d,%0.2f,%0d",
+                          trace_name, trace_accesses_2w, saved_hits_2w, saved_misses_2w, hit_rate_2w, acc_cycles_2w);
+                $fdisplay(csv_fd, "%0s,direct,%0d,%0d,%0d,%0.2f,%0d",
+                          trace_name, trace_accesses_dir, saved_hits_dir, saved_misses_dir, hit_rate_dir, acc_cycles_dir);
+                $fclose(csv_fd);
             end
         end
     endtask
 
     // ------------------------------------------------------------------------
-    // Main Simulation Process
+    // Main Simulation Execution
     // ------------------------------------------------------------------------
     reg [1023:0] cli_trace;
     integer init_csv_fd;
 
     initial begin
-        clk              = 0;
-        rst              = 1;
-        total_mismatches = 0;
+        clk                     = 0;
+        rst_2w                  = 1;
+        rst_dir                 = 1;
+        total_mismatches        = 0;
+        trace_mismatches        = 0;
+        measured_read_hit_lat   = 0;
+        measured_read_miss_lat  = 0;
 
-        // Create results.csv header if it doesn't already exist or start fresh
+        // Initialize CSV file with clean header
         if (!$value$plusargs("TRACE=%s", cli_trace)) begin
             init_csv_fd = $fopen("results/results.csv", "w");
             if (init_csv_fd != 0) begin
@@ -343,7 +435,6 @@ module tb_compare;
             end
         end
 
-        // Check if specific trace provided via CLI
         if ($value$plusargs("TRACE=%s", cli_trace)) begin
             run_trace_file(cli_trace, cli_trace);
         end else begin
