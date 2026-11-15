@@ -1,0 +1,41 @@
+# ==============================================================================
+# Yosys Synthesis Commands for Cache Evaluation
+# Project 7: 2-Way Set-Associative vs Direct-Mapped Cache
+# Owner: Member 5 (Report, Diagrams, Synthesis, Video)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Synthesize 2-Way Set-Associative Cache (cache_2way_lru)
+# ------------------------------------------------------------------------------
+# One-liner shell command:
+yosys -p "read_verilog -sv rtl/cache_2way_lru.v; synth -top cache_2way_lru; stat"
+
+# Or run with log output to file:
+yosys -l results/synth_2way.log -p "read_verilog -sv rtl/cache_2way_lru.v; synth -top cache_2way_lru; stat"
+
+# ------------------------------------------------------------------------------
+# 2. Synthesize Direct-Mapped Cache Baseline (cache_direct)
+# ------------------------------------------------------------------------------
+# One-liner shell command:
+yosys -p "read_verilog -sv rtl/cache_direct.v; synth -top cache_direct; stat"
+
+# Or run with log output to file:
+yosys -l results/synth_direct.log -p "read_verilog -sv rtl/cache_direct.v; synth -top cache_direct; stat"
+
+# ------------------------------------------------------------------------------
+# 3. Yosys Script Format (run with: yosys scripts/synth.ys)
+# ------------------------------------------------------------------------------
+# Content of synth.ys:
+#   read_verilog -sv rtl/cache_2way_lru.v
+#   hierarchy -check -top cache_2way_lru
+#   proc; opt; memory; opt; fsm; opt
+#   stat
+#   write_verilog results/synth_2way_netlist.v
+#
+# Metrics to extract from the 'stat' command output:
+#   - Number of wires
+#   - Number of wire bits
+#   - Number of public wires
+#   - Number of cells (MUX, DFF, logic gates)
+#   - Estimated flip-flops (FDRE / $_DFF_*)
+# ==============================================================================
