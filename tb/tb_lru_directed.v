@@ -151,6 +151,7 @@ module tb_lru_directed;
     // Set 1 (index = addr[8:4] = 5'b00001)
     localparam [31:0] ADDR_D = 32'h0000_0210; // Tag 1, Set 1
     localparam [31:0] ADDR_E = 32'h0000_0410; // Tag 2, Set 1
+    localparam [31:0] ADDR_F = 32'h0000_0610; // Tag 3, Set 1
 
     reg [31:0] data_out;
     reg        hit_flag;
@@ -174,6 +175,7 @@ module tb_lru_directed;
         u_mem.mem_array[ADDR_C[13:2]] = 32'hCCCC_0003;
         u_mem.mem_array[ADDR_D[13:2]] = 32'hDDDD_0004;
         u_mem.mem_array[ADDR_E[13:2]] = 32'hEEEE_0005;
+        u_mem.mem_array[ADDR_F[13:2]] = 32'hFFFF_0006;
 
         #20;
         @(posedge clk);
@@ -304,6 +306,57 @@ module tb_lru_directed;
             errors = errors + 1;
         end else begin
             $display("  PASS: Set 1 operations verified independently");
+        end
+
+        // --------------------------------------------------------------------
+        // Test 8: Set isolation - activity in Set 1 must not disturb Set 0 LRU
+        // Expected before: Set0 {A,B} lru[0]=0 ; Set1 {D,E} lru[1]=1
+        // --------------------------------------------------------------------
+        test_step = 8;
+        $display("[Step %0d] Set isolation: Set 1 traffic must not change Set 0 LRU", test_step);
+
+        // 8a: Miss on F in Set 1 -> evicts E (Way 1), lru[1] becomes 0
+        cpu_read(ADDR_F, data_out, hit_flag);
+        if (hit_flag || data_out !== 32'hFFFF_0006) begin
+            $display("  FAIL: 8a expected miss on F with FFFF0006, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end
+        if (uut_cache.lru[1] !== 1'b0 || uut_cache.lru[0] !== 1'b0) begin
+            $display("  FAIL: 8a expected lru[1]=0 and lru[0]=0, got lru[1]=%b lru[0]=%b",
+                     uut_cache.lru[1], uut_cache.lru[0]);
+            errors = errors + 1;
+        end
+
+        // 8b: Hit on D in Set 1 -> lru[1] becomes 1, lru[0] untouched
+        cpu_read(ADDR_D, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'hDDDD_0004) begin
+            $display("  FAIL: 8b expected hit on D, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end
+        if (uut_cache.lru[1] !== 1'b1 || uut_cache.lru[0] !== 1'b0) begin
+            $display("  FAIL: 8b expected lru[1]=1 and lru[0]=0, got lru[1]=%b lru[0]=%b",
+                     uut_cache.lru[1], uut_cache.lru[0]);
+            errors = errors + 1;
+        end
+
+        // 8c: Miss on C in Set 0 -> must evict A (Way 0), not B
+        cpu_read(ADDR_C, data_out, hit_flag);
+        if (hit_flag || data_out !== 32'hCCCC_0003) begin
+            $display("  FAIL: 8c expected miss on C, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end
+        if (uut_cache.tag0[0] !== ADDR_C[31:9] || uut_cache.tag1[0] !== ADDR_B[31:9]) begin
+            $display("  FAIL: 8c expected Way0=C and Way1=B in Set 0");
+            errors = errors + 1;
+        end
+
+        // 8d: B must still HIT (proves Set 0 LRU was not disturbed by Set 1)
+        cpu_read(ADDR_B, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'hBBBB_0002) begin
+            $display("  FAIL: 8d B should still hit in Set 0, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Set 1 traffic did not disturb Set 0 LRU (A evicted, B kept)");
         end
 
         // --------------------------------------------------------------------
