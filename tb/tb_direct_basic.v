@@ -163,8 +163,11 @@ module tb_direct_basic;
         $dumpvars(0, tb_direct_basic);
 
         // Initialize memory backing array
-        u_mem.mem_array[ADDR_X[13:2]] = 32'h1111_2222;
-        u_mem.mem_array[ADDR_Y[13:2]] = 32'h3333_4444;
+        u_mem.mem_array[ADDR_X[13:2] + 0] = 32'h1111_0000;
+        u_mem.mem_array[ADDR_X[13:2] + 1] = 32'h1111_0001;
+        u_mem.mem_array[ADDR_X[13:2] + 2] = 32'h1111_0002;
+        u_mem.mem_array[ADDR_X[13:2] + 3] = 32'h1111_0003;
+        u_mem.mem_array[ADDR_Y[13:2]]     = 32'h3333_4444;
 
         #20;
         @(posedge clk);
@@ -212,16 +215,44 @@ module tb_direct_basic;
         $display("[Test 2] Conflict Miss Test on Line 5 (ADDR_X and ADDR_Y)");
         // Step A: Read ADDR_X -> Miss & Refill
         cpu_read(ADDR_X, data_out, hit_flag);
-        if (hit_flag || data_out !== 32'h1111_2222) begin
-            $display("  FAIL: Cold read ADDR_X should miss!");
+        if (hit_flag || data_out !== 32'h1111_0000) begin
+            $display("  FAIL: Cold read ADDR_X should miss! Expected 11110000, got hit=%0b data=%h", hit_flag, data_out);
             errors = errors + 1;
         end else begin
-            $display("  PASS: ADDR_X cold miss and refilled");
+            $display("  PASS: ADDR_X cold miss and refilled with data %h", data_out);
+        end
+
+        // Step A.1: Spatial locality checks - read other words in the same refilled block
+        // Word 1: ADDR_X + 4
+        cpu_read(ADDR_X + 4, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'h1111_0001) begin
+            $display("  FAIL: Read ADDR_X+4 expected HIT and value 11110001, got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: ADDR_X+4 hit in cache with data %h", data_out);
+        end
+
+        // Word 2: ADDR_X + 8
+        cpu_read(ADDR_X + 8, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'h1111_0002) begin
+            $display("  FAIL: Read ADDR_X+8 expected HIT and value 11110002, got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: ADDR_X+8 hit in cache with data %h", data_out);
+        end
+
+        // Word 3: ADDR_X + 12
+        cpu_read(ADDR_X + 12, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'h1111_0003) begin
+            $display("  FAIL: Read ADDR_X+12 expected HIT and value 11110003, got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: ADDR_X+12 hit in cache with data %h", data_out);
         end
 
         // Step B: Read ADDR_X again -> HIT
         cpu_read(ADDR_X, data_out, hit_flag);
-        if (!hit_flag) begin
+        if (!hit_flag || data_out !== 32'h1111_0000) begin
             $display("  FAIL: Repeated read of ADDR_X should HIT!");
             errors = errors + 1;
         end else begin
@@ -239,7 +270,7 @@ module tb_direct_basic;
 
         // Step D: Read ADDR_X again -> must MISS because ADDR_Y evicted it
         cpu_read(ADDR_X, data_out, hit_flag);
-        if (hit_flag) begin
+        if (hit_flag || data_out !== 32'h1111_0000) begin
             $display("  FAIL: ADDR_X should have missed because it was evicted by conflict!");
             errors = errors + 1;
         end else begin
