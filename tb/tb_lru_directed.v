@@ -151,9 +151,20 @@ module tb_lru_directed;
     // Set 1 (index = addr[8:4] = 5'b00001)
     localparam [31:0] ADDR_D = 32'h0000_0210; // Tag 1, Set 1
     localparam [31:0] ADDR_E = 32'h0000_0410; // Tag 2, Set 1
+    localparam [31:0] ADDR_F = 32'h0000_0610; // Tag 3, Set 1
 
     reg [31:0] data_out;
     reg        hit_flag;
+
+    // Test 10 helpers: full A,B,A,C,B,A,C,A,B,C sequence on a fresh set (Set 2)
+    integer     k;
+    reg [31:0]  s10_addr  [0:9];
+    reg [31:0]  s10_data  [0:9];
+    reg         s10_hit   [0:9];   // expected HIT(1)/MISS(0)
+    reg [1:0]   s10_w0    [0:9];   // expected Way0 content: 0=invalid,1=A,2=B,3=C
+    reg [1:0]   s10_w1    [0:9];   // expected Way1 content
+    reg         s10_lru   [0:9];   // expected lru[2] after the access
+    reg [1:0]   got_w0, got_w1;
 
     initial begin
         $dumpfile("results/lru_directed.vcd");
@@ -174,6 +185,10 @@ module tb_lru_directed;
         u_mem.mem_array[ADDR_C[13:2]] = 32'hCCCC_0003;
         u_mem.mem_array[ADDR_D[13:2]] = 32'hDDDD_0004;
         u_mem.mem_array[ADDR_E[13:2]] = 32'hEEEE_0005;
+        u_mem.mem_array[ADDR_F[13:2]] = 32'hFFFF_0006;
+        u_mem.mem_array[32'h0000_0220 >> 2] = 32'hA0A0_0011; // Set 2, tag 1 (A)
+        u_mem.mem_array[32'h0000_0420 >> 2] = 32'hB0B0_0022; // Set 2, tag 2 (B)
+        u_mem.mem_array[32'h0000_0620 >> 2] = 32'hC0C0_0033; // Set 2, tag 3 (C)
 
         #20;
         @(posedge clk);
@@ -305,6 +320,140 @@ module tb_lru_directed;
         end else begin
             $display("  PASS: Set 1 operations verified independently");
         end
+
+        // --------------------------------------------------------------------
+        // Test 8: Set isolation - activity in Set 1 must not disturb Set 0 LRU
+        // Expected before: Set0 {A,B} lru[0]=0 ; Set1 {D,E} lru[1]=1
+        // --------------------------------------------------------------------
+        test_step = 8;
+        $display("[Step %0d] Set isolation: Set 1 traffic must not change Set 0 LRU", test_step);
+
+        // 8a: Miss on F in Set 1 -> evicts E (Way 1), lru[1] becomes 0
+        cpu_read(ADDR_F, data_out, hit_flag);
+        if (hit_flag || data_out !== 32'hFFFF_0006) begin
+            $display("  FAIL: 8a expected miss on F with FFFF0006, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end
+        if (uut_cache.lru[1] !== 1'b0 || uut_cache.lru[0] !== 1'b0) begin
+            $display("  FAIL: 8a expected lru[1]=0 and lru[0]=0, got lru[1]=%b lru[0]=%b",
+                     uut_cache.lru[1], uut_cache.lru[0]);
+            errors = errors + 1;
+        end
+
+        // 8b: Hit on D in Set 1 -> lru[1] becomes 1, lru[0] untouched
+        cpu_read(ADDR_D, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'hDDDD_0004) begin
+            $display("  FAIL: 8b expected hit on D, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end
+        if (uut_cache.lru[1] !== 1'b1 || uut_cache.lru[0] !== 1'b0) begin
+            $display("  FAIL: 8b expected lru[1]=1 and lru[0]=0, got lru[1]=%b lru[0]=%b",
+                     uut_cache.lru[1], uut_cache.lru[0]);
+            errors = errors + 1;
+        end
+
+        // 8c: Miss on C in Set 0 -> must evict A (Way 0), not B
+        cpu_read(ADDR_C, data_out, hit_flag);
+        if (hit_flag || data_out !== 32'hCCCC_0003) begin
+            $display("  FAIL: 8c expected miss on C, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end
+        if (uut_cache.tag0[0] !== ADDR_C[31:9] || uut_cache.tag1[0] !== ADDR_B[31:9]) begin
+            $display("  FAIL: 8c expected Way0=C and Way1=B in Set 0");
+            errors = errors + 1;
+        end
+
+        // 8d: B must still HIT (proves Set 0 LRU was not disturbed by Set 1)
+        cpu_read(ADDR_B, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'hBBBB_0002) begin
+            $display("  FAIL: 8d B should still hit in Set 0, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Set 1 traffic did not disturb Set 0 LRU (A evicted, B kept)");
+        end
+
+        // --------------------------------------------------------------------
+        // Test 9: A WRITE hit must also update the LRU bit
+        // State before (after Test 8): Set0 Way0=C, Way1=B, lru[0]=0 (C is LRU)
+        // --------------------------------------------------------------------
+        test_step = 9;
+        $display("[Step %0d] Write hit must update LRU (protect C, evict B)", test_step);
+
+        // 9a: Write hit on C (Way 0) -> lru[0] becomes 1 (B is now LRU)
+        cpu_write(ADDR_C, 32'h1234_5678, hit_flag);
+        if (!hit_flag) begin
+            $display("  FAIL: 9a expected write HIT on C, got miss");
+            errors = errors + 1;
+        end
+        if (uut_cache.lru[0] !== 1'b1) begin
+            $display("  FAIL: 9a write hit did not update LRU, expected lru[0]=1, got %b", uut_cache.lru[0]);
+            errors = errors + 1;
+        end
+
+        // 9b: Read miss on A in Set 0 -> victim must be Way 1 (B), not Way 0 (C)
+        cpu_read(ADDR_A, data_out, hit_flag);
+        if (hit_flag || data_out !== 32'hAAAA_0001) begin
+            $display("  FAIL: 9b expected miss on A with AAAA0001, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end
+        if (uut_cache.tag0[0] !== ADDR_C[31:9] || uut_cache.tag1[0] !== ADDR_A[31:9]) begin
+            $display("  FAIL: 9b expected Way0=C (kept) and Way1=A (filled over B)");
+            errors = errors + 1;
+        end
+
+        // 9c: C must still HIT and return the value written in 9a
+        cpu_read(ADDR_C, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'h1234_5678) begin
+            $display("  FAIL: 9c expected hit on C with 12345678, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Write hit updated LRU (C kept with new data, B evicted)");
+        end
+
+        // --------------------------------------------------------------------
+        // Test 10: Full sequence A,B,A,C,B,A,C,A,B,C on a fresh set (Set 2)
+        // Matches docs/img/lru_sequence.png (hand-derived expected states).
+        // Expected: M M H M M M M H M M  (2 hits, 8 misses)
+        // --------------------------------------------------------------------
+        test_step = 10;
+        $display("[Step %0d] Full LRU sequence A,B,A,C,B,A,C,A,B,C on Set 2", test_step);
+
+        //                 addr          data           hit  w0 w1 lru
+        s10_addr[0]=32'h220; s10_data[0]=32'hA0A0_0011; s10_hit[0]=0; s10_w0[0]=1; s10_w1[0]=0; s10_lru[0]=1; // A
+        s10_addr[1]=32'h420; s10_data[1]=32'hB0B0_0022; s10_hit[1]=0; s10_w0[1]=1; s10_w1[1]=2; s10_lru[1]=0; // B
+        s10_addr[2]=32'h220; s10_data[2]=32'hA0A0_0011; s10_hit[2]=1; s10_w0[2]=1; s10_w1[2]=2; s10_lru[2]=1; // A
+        s10_addr[3]=32'h620; s10_data[3]=32'hC0C0_0033; s10_hit[3]=0; s10_w0[3]=1; s10_w1[3]=3; s10_lru[3]=0; // C
+        s10_addr[4]=32'h420; s10_data[4]=32'hB0B0_0022; s10_hit[4]=0; s10_w0[4]=2; s10_w1[4]=3; s10_lru[4]=1; // B
+        s10_addr[5]=32'h220; s10_data[5]=32'hA0A0_0011; s10_hit[5]=0; s10_w0[5]=2; s10_w1[5]=1; s10_lru[5]=0; // A
+        s10_addr[6]=32'h620; s10_data[6]=32'hC0C0_0033; s10_hit[6]=0; s10_w0[6]=3; s10_w1[6]=1; s10_lru[6]=1; // C
+        s10_addr[7]=32'h220; s10_data[7]=32'hA0A0_0011; s10_hit[7]=1; s10_w0[7]=3; s10_w1[7]=1; s10_lru[7]=0; // A
+        s10_addr[8]=32'h420; s10_data[8]=32'hB0B0_0022; s10_hit[8]=0; s10_w0[8]=2; s10_w1[8]=1; s10_lru[8]=1; // B
+        s10_addr[9]=32'h620; s10_data[9]=32'hC0C0_0033; s10_hit[9]=0; s10_w0[9]=2; s10_w1[9]=3; s10_lru[9]=0; // C
+
+        for (k = 0; k < 10; k = k + 1) begin
+            cpu_read(s10_addr[k], data_out, hit_flag);
+
+            // Decode what each way holds (tag value equals letter number 1/2/3)
+            got_w0 = uut_cache.valid0[2] ? uut_cache.tag0[2][1:0] : 2'd0;
+            got_w1 = uut_cache.valid1[2] ? uut_cache.tag1[2][1:0] : 2'd0;
+
+            if (hit_flag !== s10_hit[k] || data_out !== s10_data[k]) begin
+                $display("  FAIL: 10.%0d expected hit=%b data=%h, got hit=%b data=%h",
+                         k+1, s10_hit[k], s10_data[k], hit_flag, data_out);
+                errors = errors + 1;
+            end
+            if (got_w0 !== s10_w0[k] || got_w1 !== s10_w1[k]) begin
+                $display("  FAIL: 10.%0d expected ways {%0d,%0d}, got {%0d,%0d}",
+                         k+1, s10_w0[k], s10_w1[k], got_w0, got_w1);
+                errors = errors + 1;
+            end
+            if (uut_cache.lru[2] !== s10_lru[k]) begin
+                $display("  FAIL: 10.%0d expected lru[2]=%b, got %b", k+1, s10_lru[k], uut_cache.lru[2]);
+                errors = errors + 1;
+            end
+        end
+        if (errors == 0)
+            $display("  PASS: 10/10 outcomes, way contents and LRU bits match the hand-derived table");
 
         // --------------------------------------------------------------------
         // Final Summary Banner
