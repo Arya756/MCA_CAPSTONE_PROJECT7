@@ -9,7 +9,7 @@
 //               4. Eviction replaces the LRU way when both ways are valid.
 //               5. Non-LRU way remains cached and hits.
 //               6. Write hit updates LRU and cached data.
-//               7. Dumps waveform to docs/img/lru_directed.vcd for GTKWave analysis.
+//               7. Dumps waveform to results/lru_directed.vcd for GTKWave analysis.
 // ============================================================================
 
 `timescale 1ns / 1ps
@@ -156,7 +156,7 @@ module tb_lru_directed;
     reg        hit_flag;
 
     initial begin
-        $dumpfile("docs/img/lru_directed.vcd");
+        $dumpfile("results/lru_directed.vcd");
         $dumpvars(0, tb_lru_directed);
 
         clk       = 0;
