@@ -22,7 +22,7 @@ Reference: [`docs/TEAM_TASKS.md`](docs/TEAM_TASKS.md)
 
 | Member | Role | Primary File Ownership | Deliverables & Tasks |
 |---|---|---|---|
-| **Member 1** (Lead) | Architecture & Lead | `rtl/cache_2way_lru.v` | Repo setup, 2-way RTL, GTKWave waveform analysis, report sections III.A, III.B, III.D |
+| **Member 1** (Lead) | Architecture & Lead | `rtl/cache_2way_lru.v` | Repo setup, 2-way RTL, GTKWave waveform guide (`docs/WAVEFORM_GUIDE.md`), explainer (`docs/MEMBER1_EXPLAINER.md`), report sections III.A, III.B, III.D |
 | **Member 2** | LRU & Verification | `tb/tb_lru_directed.v` | True LRU state logic, directed replacement testbench, LRU state diagram, report section III.C |
 | **Member 3** | Baseline & Memory | `rtl/cache_direct.v`, `rtl/main_memory.v` | Direct-mapped baseline, memory burst protocol, `tb_direct_basic.v`, report sections III.E, III.F |
 | **Member 4** | Traces & Automation | `scripts/gen_traces.py`, `tb/tb_compare.v`, `scripts/run_all.sh` | 7+ evaluation traces, golden memory verification testbench, automated regression runner, report sections III.G, IV |
@@ -57,9 +57,11 @@ MCA_CAPSTONE_PROJECT7/
 ├── README.md                       # Master project overview and instructions
 ├── docs/
 │   ├── img/                        # Waveforms, diagrams, and figures (.gitkeep)
+│   ├── MEMBER1_EXPLAINER.md        # Member 1 interview-prep deep-dive guide
 │   ├── REPORT_PHASE1.md            # IEEE report skeleton with section owners
 │   ├── TEAM_TASKS.md               # Team task plan and deliverables
-│   └── VIDEO_SCRIPT.md             # Timed 5-minute video presentation script
+│   ├── VIDEO_SCRIPT.md             # Timed 5-minute video presentation script
+│   └── WAVEFORM_GUIDE.md           # GTKWave waveform inspection instructions
 ├── results/
 │   ├── results.csv                 # Automated testbench benchmark output
 │   └── yosys_cmd.txt               # Synthesis commands and resource inspection
