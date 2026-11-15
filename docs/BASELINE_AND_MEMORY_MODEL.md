@@ -77,5 +77,34 @@ iverilog -g2012 -DRD_LAT=4 rtl/cache_2way_lru.v rtl/cache_direct.v rtl/main_memo
 
 # Example: Compile regression suite with Read Latency = 16 cycles
 iverilog -g2012 -DRD_LAT=16 rtl/cache_2way_lru.v rtl/cache_direct.v rtl/main_memory.v tb/tb_compare.v
+
+# Example: Compile regression suite with Write Latency = 2 or 8 cycles
+iverilog -g2012 -DWR_LAT=2 rtl/cache_2way_lru.v rtl/cache_direct.v rtl/main_memory.v tb/tb_compare.v
+iverilog -g2012 -DWR_LAT=8 rtl/cache_2way_lru.v rtl/cache_direct.v rtl/main_memory.v tb/tb_compare.v
 ```
 Or via the automated script `scripts/run_latency_study.sh`.
+
+---
+
+### 2.5 Write Latency Sensitivity Study (WR_LAT = 2, 4, 8 Cycles, RD_LAT = 8)
+
+To evaluate execution cycle sensitivity to main memory write latency under the Write-Through policy, a full regression sweep was executed with $WR\_LAT \in \{2, 4, 8\}$ clock cycles:
+
+| Trace Name | Architecture | Accesses | Writes | Cycles (WR_LAT=2) | Cycles (WR_LAT=4) | Cycles (WR_LAT=8) | Delta (4 → 2) | Delta (4 → 8) | Analytical Verification |
+|---|---|---|---|---|---|---|---|---|---|
+| `seq_stream` | 2-Way LRU | 256 | 0 | 1,280 | 1,280 | 1,280 | 0 | 0 | Read-only workload |
+| `seq_stream` | Direct-Mapped | 256 | 0 | 1,280 | 1,280 | 1,280 | 0 | 0 | Read-only workload |
+| `small_loop` | 2-Way LRU | 640 | 0 | 1,472 | 1,472 | 1,472 | 0 | 0 | Read-only workload |
+| `small_loop` | Direct-Mapped | 640 | 0 | 1,472 | 1,472 | 1,472 | 0 | 0 | Read-only workload |
+| `pingpong` | 2-Way LRU | 200 | 0 | 424 | 424 | 424 | 0 | 0 | Read-only workload |
+| `pingpong` | Direct-Mapped | 200 | 0 | 2,800 | 2,800 | 2,800 | 0 | 0 | Read-only workload |
+| `cyclic3` | 2-Way LRU | 300 | 0 | 4,200 | 4,200 | 4,200 | 0 | 0 | Read-only workload |
+| `cyclic3` | Direct-Mapped | 300 | 0 | 4,200 | 4,200 | 4,200 | 0 | 0 | Read-only workload |
+| `strided` | 2-Way LRU | 256 | 0 | 608 | 608 | 608 | 0 | 0 | Read-only workload |
+| `strided` | Direct-Mapped | 256 | 0 | 608 | 608 | 608 | 0 | 0 | Read-only workload |
+| `random` | 2-Way LRU | 300 | 0 | 3,936 | 3,936 | 3,936 | 0 | 0 | Read-only workload |
+| `random` | Direct-Mapped | 300 | 0 | 3,984 | 3,984 | 3,984 | 0 | 0 | Read-only workload |
+| **`mixed_rw`** | **2-Way LRU** | **300** | **103** | **1,293** | **1,499** | **1,911** | **-206** | **+412** | **★ Exact: $103 \times (-2) = -206$, $103 \times (+4) = +412$** |
+| **`mixed_rw`** | **Direct-Mapped** | **300** | **103** | **1,293** | **1,499** | **1,911** | **-206** | **+412** | **★ Exact: $103 \times (-2) = -206$, $103 \times (+4) = +412$** |
+
+**Key Architectural Insight:** Under a Write-Through policy without write buffers, every memory write stalls the pipeline for $WR\_LAT$ cycles. In `mixed_rw.txt` (which contains exactly 103 store instructions), the cycle change strictly satisfies $\Delta \text{Cycles} = \text{Writes} \times \Delta WR\_LAT$. Traces without stores exhibit zero cycle variance.
