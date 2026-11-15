@@ -11,6 +11,14 @@
 
 `timescale 1ns / 1ps
 
+`ifndef RD_LAT
+`define RD_LAT 8
+`endif
+
+`ifndef WR_LAT
+`define WR_LAT 4
+`endif
+
 module tb_direct_basic;
 
     reg         clk;
@@ -67,8 +75,8 @@ module tb_direct_basic;
 
     // Instantiate Main Memory Model
     main_memory #(
-        .RD_LAT(8),
-        .WR_LAT(4),
+        .RD_LAT(`RD_LAT),
+        .WR_LAT(`WR_LAT),
         .MEM_WORDS(4096)
     ) u_mem (
         .clk(clk),
@@ -149,6 +157,10 @@ module tb_direct_basic;
         cpu_addr  = 0;
         cpu_wdata = 0;
         errors    = 0;
+
+        // Initialize VCD waveform output
+        $dumpfile("results/direct_basic.vcd");
+        $dumpvars(0, tb_direct_basic);
 
         // Initialize memory backing array
         u_mem.mem_array[ADDR_X[13:2]] = 32'h1111_2222;
