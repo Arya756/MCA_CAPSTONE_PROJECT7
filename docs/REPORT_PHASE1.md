@@ -39,19 +39,19 @@ To ensure a strictly fair comparison between the 2-way set-associative cache and
 
 The architectural dimensions are derived directly from the fundamental cache formulas:
 
-$$\text{Block Count} = \frac{\text{Data Capacity}}{\text{Block Size}} = \frac{1024\text{ Bytes}}{16\text{ Bytes}} = 64\text{ blocks}$$
+Block Count = Data Capacity / Block Size = 1024 Bytes / 16 Bytes = 64 blocks
 
 - **Direct-Mapped Cache (1 Way):**
-  - Number of cache lines: $64 / 1 = 64\text{ lines}$.
-  - Block offset field: $\log_2(\text{Block Size}) = \log_2(16) = \mathbf{4\text{ bits}}$ (`addr[3:0]`). Within this field, `addr[1:0]` is the 2-bit byte offset (assumed word-aligned `2'b00`), and `addr[3:2]` selects one of the 4 words within the block.
-  - Set index field: $\log_2(\text{Number of Lines}) = \log_2(64) = \mathbf{6\text{ bits}}$ (`addr[9:4]`), selecting lines 0 through 63.
-  - Tag field: $32 - \text{Index Bits} - \text{Offset Bits} = 32 - 6 - 4 = \mathbf{22\text{ bits}}$ (`addr[31:10]`).
+  - Number of cache lines: 64 / 1 = 64 lines.
+  - Block offset field: log2(Block Size) = log2(16) = **4 bits** (`addr[3:0]`). Within this field, `addr[1:0]` is the 2-bit byte offset (assumed word-aligned `2'b00`), and `addr[3:2]` selects one of the 4 words within the block.
+  - Set index field: log2(Number of Lines) = log2(64) = **6 bits** (`addr[9:4]`), selecting lines 0 through 63.
+  - Tag field: 32 - Index Bits - Offset Bits = 32 - 6 - 4 = **22 bits** (`addr[31:10]`).
 
 - **2-Way Set-Associative Cache (2 Ways):**
-  - Number of sets: $\frac{\text{Data Capacity}}{\text{Block Size} \times \text{Ways}} = \frac{1024}{16 \times 2} = \mathbf{32\text{ sets}}$.
-  - Block offset field: $\log_2(16) = \mathbf{4\text{ bits}}$ (`addr[3:0]`), with `addr[3:2]` selecting 1 of 4 words.
-  - Set index field: $\log_2(32) = \mathbf{5\text{ bits}}$ (`addr[8:4]`), selecting sets 0 through 31.
-  - Tag field: $32 - \text{Index Bits} - \text{Offset Bits} = 32 - 5 - 4 = \mathbf{23\text{ bits}}$ (`addr[31:9]`).
+  - Number of sets: Data Capacity / (Block Size x Ways) = 1024 / (16 x 2) = **32 sets**.
+  - Block offset field: log2(16) = **4 bits** (`addr[3:0]`), with `addr[3:2]` selecting 1 of 4 words.
+  - Set index field: log2(32) = **5 bits** (`addr[8:4]`), selecting sets 0 through 31.
+  - Tag field: 32 - Index Bits - Offset Bits = 32 - 5 - 4 = **23 bits** (`addr[31:9]`).
 
 | Parameter | 2-Way Set-Associative Cache | Direct-Mapped Baseline | Fairness Rationale |
 |---|---|---|---|
@@ -97,10 +97,10 @@ The 2-way set-associative cache datapath consists of two parallel storage ways (
 #### 1. Datapath Components
 - **Storage Arrays:**  
   Each of the 32 sets contains storage for both ways:
-  - `valid0` and `valid1`: $32 \times 1$-bit registers indicating whether the cached block holds valid data.
-  - `tag0` and `tag1`: $32 \times 23$-bit registers storing the memory block tag.
-  - `data0` and `data1`: $32 \times 4 \times 32$-bit storage arrays holding four 32-bit words per block.
-  - `lru`: $32 \times 1$-bit registers tracking the replacement state for each set.
+  - `valid0` and `valid1`: 32 x 1-bit registers indicating whether the cached block holds valid data.
+  - `tag0` and `tag1`: 32 x 23-bit registers storing the memory block tag.
+  - `data0` and `data1`: 32 x 4 x 32-bit storage arrays holding four 32-bit words per block.
+  - `lru`: 32 x 1-bit registers tracking the replacement state for each set.
 - **Parallel Tag Comparators:**  
   When an address arrives, both ways are checked concurrently in hardware using continuous assignment:
   ```verilog
@@ -191,27 +191,29 @@ All latencies were experimentally verified via `results/lru_directed.vcd` under 
 
 | Cycle # | Clock Time Window | Controller State | Memory State | Detailed RTL & Hardware Action |
 |---|---|---|---|---|
-| **Cycle 1** | $45\text{ ns} \to 55\text{ ns}$ | `STATE_IDLE` | `MEM_IDLE` | CPU asserts `cpu_req = 1`. Controller latches address and transitions to `STATE_LOOKUP`. |
-| **Cycle 2** | $55\text{ ns} \to 65\text{ ns}$ | `STATE_LOOKUP` | `MEM_IDLE` | Parallel tag compare misses (`hit0=0, hit1=0`). Controller asserts `mem_req <= 1'b1`, `mem_we <= 1'b0`, and enters `STATE_MISS_FETCH`. |
-| **Cycle 3** | $65\text{ ns} \to 75\text{ ns}$ | `STATE_MISS_FETCH` | `MEM_WAIT` | `main_memory` samples `mem_req == 1`, latches block address, sets `timer <= 1`, and enters wait state. Cache drops `mem_req <= 0`. |
-| **Cycles 4–9** | $75\text{ ns} \to 135\text{ ns}$ | `STATE_MISS_FETCH` | `MEM_WAIT` | `main_memory` counts `timer` from 2 to 7 (6 wait cycles) satisfying `RD_LAT = 8`. |
-| **Cycle 10** | $135\text{ ns} \to 145\text{ ns}$ | `STATE_MISS_FETCH` | `MEM_BURST` | Memory asserts `mem_ready <= 1'b1`, drives Word 0. Cache buffers Word 0 into `refill_buf[0]`. |
-| **Cycle 11** | $145\text{ ns} \to 155\text{ ns}$ | `STATE_MISS_FETCH` | `MEM_BURST` | Memory drives Word 1. Cache buffers Word 1 into `refill_buf[1]`. |
-| **Cycle 12** | $155\text{ ns} \to 165\text{ ns}$ | `STATE_MISS_FETCH` | `MEM_BURST` | Memory drives Word 2. Cache buffers Word 2 into `refill_buf[2]`. |
-| **Cycle 13** | $165\text{ ns} \to 175\text{ ns}$ | `STATE_MISS_FETCH` | `MEM_BURST` | Memory drives Word 3. Cache completes refill into victim way, updates LRU bit, routes requested word to `cpu_rdata`, asserts `cpu_ready <= 1'b1`, and returns to `STATE_IDLE`. |
-| **Cycle 14** | $175\text{ ns} \to 185\text{ ns}$ | `STATE_IDLE` | `MEM_IDLE` | `cpu_ready` is active on CPU bus. CPU reads data word and drops `cpu_req = 0`. Handshake complete. |
+| **Cycle 1** | 45 ns to 55 ns | `STATE_IDLE` | `MEM_IDLE` | CPU asserts `cpu_req = 1`. Controller latches address and transitions to `STATE_LOOKUP`. |
+| **Cycle 2** | 55 ns to 65 ns | `STATE_LOOKUP` | `MEM_IDLE` | Parallel tag compare misses (`hit0=0, hit1=0`). Controller asserts `mem_req <= 1'b1`, `mem_we <= 1'b0`, and enters `STATE_MISS_FETCH`. |
+| **Cycle 3** | 65 ns to 75 ns | `STATE_MISS_FETCH` | `MEM_WAIT` | `main_memory` samples `mem_req == 1`, latches block address, sets `timer <= 1`, and enters wait state. Cache drops `mem_req <= 0`. |
+| **Cycles 4 to 9** | 75 ns to 135 ns | `STATE_MISS_FETCH` | `MEM_WAIT` | `main_memory` counts `timer` from 2 to 7 (6 wait cycles) satisfying `RD_LAT = 8`. |
+| **Cycle 10** | 135 ns to 145 ns | `STATE_MISS_FETCH` | `MEM_BURST` | Memory asserts `mem_ready <= 1'b1`, drives Word 0. Cache buffers Word 0 into `refill_buf[0]`. |
+| **Cycle 11** | 145 ns to 155 ns | `STATE_MISS_FETCH` | `MEM_BURST` | Memory drives Word 1. Cache buffers Word 1 into `refill_buf[1]`. |
+| **Cycle 12** | 155 ns to 165 ns | `STATE_MISS_FETCH` | `MEM_BURST` | Memory drives Word 2. Cache buffers Word 2 into `refill_buf[2]`. |
+| **Cycle 13** | 165 ns to 175 ns | `STATE_MISS_FETCH` | `MEM_BURST` | Memory drives Word 3. Cache completes refill into victim way, updates LRU bit, routes requested word to `cpu_rdata`, asserts `cpu_ready <= 1'b1`, and returns to `STATE_IDLE`. |
+| **Cycle 14** | 175 ns to 185 ns | `STATE_IDLE` | `MEM_IDLE` | `cpu_ready` is active on CPU bus. CPU reads data word and drops `cpu_req = 0`. Handshake complete. |
 
-$$\text{Total Read Miss Latency} = 1 + 1 + 1 + 6 + 4 + 1 = \mathbf{14\text{ Clock Cycles (140 ns)}}$$
+Total Read Miss Latency = 1 + 1 + 1 + 6 + 4 + 1 = **14 Clock Cycles (140 ns)**
 
 - **Write Hit and Write Miss Latency (7 Clock Cycles = 70 ns):**
-  Under write-through no-write-allocate, both write hits and write misses take identical time:
-  - Cycle 1: Request detection and latching (`IDLE` $\to$ `LOOKUP`).
-  - Cycle 2: Tag comparison, cache word update (on hit), assert `mem_req = 1, mem_we = 1` $\to$ `STATE_WRITE_THROUGH`.
-  - Cycle 3: Memory latches word write (`timer <= 1`).
-  - Cycles 4–5: Memory write countdown (`timer = 2, 3` with `WR_LAT = 4`).
-  - Cycle 6: Memory writes array, asserts `mem_ready = 1`; cache asserts `cpu_ready = 1`.
-  - Cycle 7: CPU samples `cpu_ready = 1` and drops request.
-  $$\text{Total Write Latency} = 1 + 1 + 1 + 2 + 1 + 1 = \mathbf{7\text{ Clock Cycles (70 ns)}}$$
+  Under write-through no-write-allocate, both write hits and write misses take identical time (7 clock cycles):
+  - Cycle 1 (CPU Request): CPU asserts `cpu_req = 1, cpu_we = 1`. Controller latches address and data (`IDLE` to `LOOKUP`).
+  - Cycle 2 (Lookup & Memory Request): Tag comparison evaluates hit/miss. On write hit, cache updates internal data word and LRU bit; on write miss, no cache allocation occurs (no-write-allocate). Controller asserts `mem_req <= 1'b1, mem_we <= 1'b1` and enters `STATE_WRITE_THROUGH`.
+  - Cycle 3 (Memory Cycle 1 of 4): Memory samples write request, latches word address and data, and sets `timer <= 1` in `STATE_WRITE_WAIT`. Cache deasserts `mem_req`.
+  - Cycle 4 (Memory Cycle 2 of 4): Memory in `STATE_WRITE_WAIT` increments `timer <= 2`.
+  - Cycle 5 (Memory Cycle 3 of 4): Memory in `STATE_WRITE_WAIT` increments `timer <= 3` (reaching `WR_LAT - 1`).
+  - Cycle 6 (Memory Cycle 4 of 4 / Commit): Memory reaches `timer >= WR_LAT - 1`, writes word to `mem_array`, asserts `mem_ready <= 1'b1`, and returns to `STATE_IDLE`. Concurrently, cache detects `mem_ready == 1`, asserts `cpu_ready <= 1'b1`, and returns to `STATE_IDLE`.
+  - Cycle 7 (Handshake Completion): `cpu_ready = 1` is active on CPU bus. CPU detects ready, completes write, and drops `cpu_req <= 0`.
+
+Total Write Latency = 1 (CPU dispatch) + 1 (Cache lookup & mem request) + 4 (Memory write latency) + 1 (CPU completion handshake) = **7 Clock Cycles (70 ns)**
 
 *(Detailed GTKWave waveforms, signal lists, and zoom windows are documented in [`docs/WAVEFORM_GUIDE.md`](WAVEFORM_GUIDE.md).)*
 
