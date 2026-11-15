@@ -1,0 +1,18 @@
+# Compilation artifacts
+*.vvp
+*.vcd
+*.log
+
+# Simulation outputs
+results/results.csv
+traces/*.txt
+!traces/.gitkeep
+!results/.gitkeep
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS generated files
+.DS_Store
+Thumbs.db
