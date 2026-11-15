@@ -47,6 +47,22 @@ module tb_direct_basic;
     wire [31:0] miss_count;
     wire [31:0] cycle_count;
 
+    // Memory transaction counter (counts rising edges of mem_req)
+    integer mem_req_count;
+    reg     prev_mem_req;
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            mem_req_count <= 0;
+            prev_mem_req  <= 1'b0;
+        end else begin
+            prev_mem_req <= mem_req;
+            if (mem_req && !prev_mem_req) begin
+                mem_req_count <= mem_req_count + 1;
+            end
+        end
+    end
+
     integer errors;
 
     // Instantiate Direct-Mapped Cache
@@ -103,7 +119,7 @@ module tb_direct_basic;
         output        was_hit;
         reg [31:0] prev_hits;
         begin
-            @(posedge clk);
+            @(negedge clk);
             prev_hits = hit_count;
             cpu_addr  = addr;
             cpu_we    = 1'b0;
@@ -125,7 +141,7 @@ module tb_direct_basic;
         output        was_hit;
         reg [31:0] prev_hits;
         begin
-            @(posedge clk);
+            @(negedge clk);
             prev_hits = hit_count;
             cpu_addr  = addr;
             cpu_wdata = wdata;
@@ -378,8 +394,17 @@ module tb_direct_basic;
         end
 
         // --------------------------------------------------------------------
-        // Final Summary Banner
+        // Final Summary Banner & Memory Transaction Verification
         // --------------------------------------------------------------------
+        $display("------------------------------------------------------------");
+        $display("MEMORY TRANSACTION MONITOR:");
+        $display("  Observed memory transactions (rising edges of mem_req): %0d", mem_req_count);
+        $display("  Expected memory transactions (read misses + writes):     %0d", 8);
+        if (mem_req_count == 8) begin
+            $display("  Transaction Count Comparison: MATCH (Observed %0d == Expected %0d)", mem_req_count, 8);
+        end else begin
+            $display("  Transaction Count Comparison: MISMATCH! (Observed %0d != Expected %0d)", mem_req_count, 8);
+        end
         $display("------------------------------------------------------------");
         if (errors == 0) begin
             $display("Direct-Mapped Basic Tests Summary: ALL CHECKS PASSED!");
