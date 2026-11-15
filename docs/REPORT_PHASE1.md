@@ -276,7 +276,7 @@ Insert the experimental results from `results/results.csv`:
 
 | Member | Assigned Role | Owned Files & Deliverables | Real Commit Count | Status |
 |---|---|---|---|---|
-| **Member 1** | Team Lead & 2-Way RTL | `rtl/cache_2way_lru.v`, report sections III.A, III.B, III.D | *Checked via git log* | Starter Ready |
+| **Member 1** | Team Lead & 2-Way RTL | `rtl/cache_2way_lru.v`, `docs/WAVEFORM_GUIDE.md`, `docs/MEMBER1_EXPLAINER.md`, report sections III.A, III.B, III.D | *6 commits on branch member1-rtl-docs* | Complete |
 | **Member 2** | LRU Logic & Verification | `tb/tb_lru_directed.v`, LRU diagram, section III.C | *Checked via git log* | Starter Ready |
 | **Member 3** | Direct Baseline & Memory | `rtl/cache_direct.v`, `rtl/main_memory.v`, `tb/tb_direct_basic.v`, sections III.E, III.F | *Checked via git log* | Starter Ready |
 | **Member 4** | Traces, Comparison & Scripts | `scripts/gen_traces.py`, `scripts/run_all.sh`, `tb/tb_compare.v`, `traces/`, sections III.G, IV | *Checked via git log* | Starter Ready |
