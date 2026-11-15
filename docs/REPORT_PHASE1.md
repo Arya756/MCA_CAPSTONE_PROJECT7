@@ -161,9 +161,15 @@ To evaluate cache resilience against varying memory subsystem delays, a full reg
 | `mixed_rw` | Direct-Mapped | 300 | 56 | 81.33% | 1,371 | 1,499 | 1,755 | -128 (-8.5%) | +256 (+17.1%) |
 
 **Key Architectural Insights from Read Latency Sensitivity:**
-1. **Linear Scaling with Miss Penalty:** The cycle variance across memory latency settings follows the exact analytical formula $\Delta \text{Cycles} = \Delta RD\_LAT \times \text{Read Misses}$. Shifting $RD\_LAT$ from 8 to 4 decreases execution time by exactly 4 cycles per miss, while increasing $RD\_LAT$ to 16 adds 8 cycles per miss.
+1. **Linear Scaling with Miss Penalty:** The cycle variance across memory latency settings follows the exact analytical relationship:
+   $$\Delta\text{cycles} = (\text{read misses}) \times (\Delta RD\_LAT)$$
+   Shifting $RD\_LAT$ from 8 to 4 decreases execution time by exactly 4 cycles per read miss, while increasing $RD\_LAT$ to 16 adds exactly 8 cycles per read miss.
 2. **Associativity as a Latency Buffer:** On conflict-prone traces such as `pingpong`, the 2-way associative cache experiences only 2 cold misses, causing its total execution time to increase by a mere 3.8% (424 to 440 cycles) when memory latency doubles. In stark contrast, the direct-mapped cache suffers 200 conflict misses, resulting in a 57.1% cycle increase (2,800 to 4,400 cycles). This demonstrates that set associativity effectively shields the CPU from off-chip memory latency bottlenecks.
-3. **Simulation-Verified Read vs. Write Miss Decomposition in `mixed_rw`:** Across the 300 instructions of `mixed_rw.txt` (197 reads, 103 writes), the cache logs 244 hits and 56 misses. Direct instrumented cycle simulation measures the exact breakdown: **165 read hits, 32 read misses, 79 write hits, and 24 write misses**. Under No-Write-Allocate, write misses do not trigger block refills, meaning that execution cycles scale solely with the 32 read misses: $\Delta \text{Cycles} = 32 \times (-4) = -128$ cycles ($RD\_LAT\text{ }8 \to 4$) and $32 \times (+8) = +256$ cycles ($RD\_LAT\text{ }8 \to 16$), proving exact analytical and simulation parity.
+3. **Simulation-Verified Read vs. Write Miss Decomposition in `mixed_rw`:** Across the 300 instructions of `mixed_rw.txt` (197 reads, 103 writes), the cache logs 244 hits and 56 misses. Direct cycle-accurate simulation measures the exact breakdown: **165 read hits, 32 read misses, 79 write hits, and 24 write misses**. Under No-Write-Allocate, write misses do not trigger block refills, meaning execution cycles scale solely with the 32 read misses:
+   $$\Delta\text{cycles} = 32 \times (\Delta RD\_LAT)$$
+   - For $RD\_LAT = 4$: $32 \times (-4) = -128\text{ cycles}$
+   - For $RD\_LAT = 16$: $32 \times (+8) = +256\text{ cycles}$
+   This confirms analytical and simulation parity to the exact single cycle.
 
 ### B. Memory Write Latency Sensitivity Study (WR_LAT = 2, 4, 8 Cycles)
 *Contributed by Member 3 (Direct-Mapped Baseline & Memory Model)*  
@@ -185,11 +191,14 @@ To analyze the performance impact of backing memory write stalls under the unbuf
 | `strided` | Direct-Mapped | 256 | 0 | 608 | 608 | 608 | 0 | 0 | Read-only workload |
 | `random` | 2-Way LRU | 300 | 0 | 3,936 | 3,936 | 3,936 | 0 | 0 | Read-only workload |
 | `random` | Direct-Mapped | 300 | 0 | 3,984 | 3,984 | 3,984 | 0 | 0 | Read-only workload |
-| **`mixed_rw`** | **2-Way LRU** | **300** | **103** | **1,293** | **1,499** | **1,911** | **-206** | **+412** | **★ Exact: $103 \times (-2) = -206$, $103 \times (+4) = +412$** |
-| **`mixed_rw`** | **Direct-Mapped** | **300** | **103** | **1,293** | **1,499** | **1,911** | **-206** | **+412** | **★ Exact: $103 \times (-2) = -206$, $103 \times (+4) = +412$** |
+| **`mixed_rw`** | **2-Way LRU** | **300** | **103** | **1,293** | **1,499** | **1,911** | **-206** | **+412** | **★ Exact: 103 × (-2) = -206 cycles, 103 × (+4) = +412 cycles** |
+| **`mixed_rw`** | **Direct-Mapped** | **300** | **103** | **1,293** | **1,499** | **1,911** | **-206** | **+412** | **★ Exact: 103 × (-2) = -206 cycles, 103 × (+4) = +412 cycles** |
 
 **Key Architectural Insights from Write Latency Sensitivity:**
-1. **Direct Write-Stall Correlation:** Because Phase I uses an unbuffered Write-Through policy, every store instruction stalls the processor for exactly $WR\_LAT$ memory cycles regardless of whether it hit or missed in the cache. The cycle variance precisely matches $\Delta \text{Cycles} = \text{Writes} \times \Delta WR\_LAT$.
+1. **Direct Write-Stall Correlation:** Because Phase I uses an unbuffered Write-Through policy, every store instruction stalls the processor for exactly $WR\_LAT$ memory cycles regardless of whether it hit or missed in the cache. The cycle variance follows:
+   $$\Delta\text{cycles} = (\text{writes}) \times (\Delta WR\_LAT)$$
+   - For $WR\_LAT = 2$: $103 \times (-2) = -206\text{ cycles}$
+   - For $WR\_LAT = 8$: $103 \times (+4) = +412\text{ cycles}$
 2. **Workload Selectivity:** Traces comprising exclusively read instructions (`seq_stream`, `small_loop`, `pingpong`, `cyclic3`, `strided`, `random`) demonstrate zero cycle variance across $WR\_LAT$ changes, validating that read refill bursts depend solely on $RD\_LAT$. The write-heavy trace `mixed_rw` (103 writes) highlights the substantial CPU stall penalty of unbuffered write-through operations, motivating a write buffer or write-back policy for Phase II.
 
 *TODO: Member 5:*  
@@ -204,7 +213,7 @@ To analyze the performance impact of backing memory write stalls under the unbuf
 |---|---|---|---|---|
 | **Member 1** | Team Lead & 2-Way RTL | `rtl/cache_2way_lru.v`, report sections III.A, III.B, III.D | *Checked via git log* | Starter Ready |
 | **Member 2** | LRU Logic & Verification | `tb/tb_lru_directed.v`, LRU diagram, section III.C | *Checked via git log* | Starter Ready |
-| **Member 3** | Direct Baseline & Memory | `rtl/cache_direct.v`, `rtl/main_memory.v`, `tb/tb_direct_basic.v`, sections III.E, III.F, latency study | 15 commits | Completed |
+| **Member 3** | Direct Baseline & Memory | `rtl/cache_direct.v`, `rtl/main_memory.v`, `tb/tb_direct_basic.v`, sections III.E, III.F, latency study | 16 commits | Completed |
 | **Member 4** | Traces, Comparison & Scripts | `scripts/gen_traces.py`, `scripts/run_all.sh`, `tb/tb_compare.v`, `traces/`, sections III.G, IV | *Checked via git log* | Starter Ready |
 | **Member 5** | Report, Synthesis & Video | `docs/`, `results/yosys_cmd.txt`, IEEE report formatting, video recording | *Checked via git log* | Starter Ready |
 
