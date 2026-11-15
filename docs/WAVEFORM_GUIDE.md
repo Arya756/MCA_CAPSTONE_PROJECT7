@@ -6,7 +6,29 @@
 
 ---
 
-## 1. Opening the Waveform in GTKWave
+## 1. Automated Waveform Generation (Python Script)
+
+The repository provides an automated script [`scripts/plot_waveform.py`](../scripts/plot_waveform.py) that reads `results/lru_directed.vcd` and renders publication-quality stacked digital timing diagrams directly to `docs/img/`:
+- `docs/img/waveform_miss.png` (Read miss window: 30 ns to 200 ns)
+- `docs/img/waveform_hit.png` (Read hit window: 350 ns to 400 ns)
+
+Each image displays 15 stacked signal rows in exact hardware order (`clk`, `cpu_req`, `cpu_we`, `cpu_addr`, `state` with Verilog localparam names, `hit0`, `hit1`, `hit_way`, `victim_way`, `mem_req`, `mem_ready`, `mem_rdata`, `refill_count`, `cpu_ready`, `cpu_rdata`), with 1-bit step lines, labeled bus boxes, vertical timing markers at `cpu_req` and `cpu_ready` rising edges, and the measured cycle count in the title.
+
+### How to Re-Run:
+```bash
+# 1. Ensure the simulation VCD is generated:
+./scripts/run_all.sh
+# Or run directed testbench directly:
+iverilog -g2012 -o lru_test.vvp rtl/cache_2way_lru.v rtl/main_memory.v tb/tb_lru_directed.v
+vvp lru_test.vvp
+
+# 2. Generate both waveform PNGs:
+python3 scripts/plot_waveform.py
+```
+
+---
+
+## 2. Interactive Waveform Inspection in GTKWave
 
 Run the regression or compile and run the directed testbench to generate the VCD file:
 ```bash
@@ -23,7 +45,7 @@ gtkwave results/lru_directed.vcd
 
 ---
 
-## 2. Signal Selection Checklist
+## 3. Signal Selection Checklist
 
 In the GTKWave **SST** (left pane), navigate to `tb_lru_directed` and its sub-module `uut_cache`. Drag the following signals into the waveform display area:
 
@@ -46,7 +68,7 @@ In the GTKWave **SST** (left pane), navigate to `tb_lru_directed` and its sub-mo
 
 ---
 
-## 3. Screenshot 1: Read MISS (Step 1 Cold Miss on Addr A)
+## 4. Screenshot 1: Read MISS (Step 1 Cold Miss on Addr A)
 
 ### Exact Simulation Timing (from `results/lru_directed.vcd`)
 - **Target Address:** `ADDR_A = 32'h0000_0200` (Tag = 1, Set Index = 0, Word Offset = 0)
@@ -71,12 +93,12 @@ In the GTKWave **SST** (left pane), navigate to `tb_lru_directed` and its sub-mo
 ### GTKWave Zoom & Screenshot Settings
 - In the GTKWave toolbar, set Zoom Range from 30 ns to 200 ns.
 - Verify cursor is placed at 175 ns (when `cpu_ready` asserts).
-- Export / Take screenshot and save to:
+- Export / Take screenshot or use the script-generated image:
   `docs/img/waveform_miss.png`
 
 ---
 
-## 4. Screenshot 2: Read HIT (Step 3 Read Hit on Addr A)
+## 5. Screenshot 2: Read HIT (Step 3 Read Hit on Addr A)
 
 ### Exact Simulation Timing (from `results/lru_directed.vcd`)
 - **Target Address:** `ADDR_A = 32'h0000_0200` (Tag = 1, Set Index = 0, Word Offset = 0)
@@ -95,5 +117,5 @@ In the GTKWave **SST** (left pane), navigate to `tb_lru_directed` and its sub-mo
 ### GTKWave Zoom & Screenshot Settings
 - In the GTKWave toolbar, set Zoom Range from 350 ns to 400 ns.
 - Place cursor at 375 ns (showing `hit0 = 1` and `cpu_ready = 1`).
-- Export / Take screenshot and save to:
+- Export / Take screenshot or use the script-generated image:
   `docs/img/waveform_hit.png`
