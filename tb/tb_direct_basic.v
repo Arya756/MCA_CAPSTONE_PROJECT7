@@ -6,7 +6,9 @@
 //               1. Write-through and read-back on the same address.
 //               2. Verification of conflict miss on two addresses mapping to
 //                  the same cache line (direct conflict thrashing).
-//               3. Verification of No-Write-Allocate on write miss.
+//               3. Verification of Write Hit (cache update and memory write-through).
+//               4. Verification of Write Miss to different line (cache isolation
+//                  and no-write-allocate check).
 // ============================================================================
 
 `timescale 1ns / 1ps
@@ -145,6 +147,7 @@ module tb_direct_basic;
     localparam [31:0] ADDR_X = 32'h0000_0450;
     localparam [31:0] ADDR_Y = 32'h0000_0850;
     localparam [31:0] ADDR_W = 32'h0000_0120; // Line 18
+    localparam [31:0] ADDR_Z = 32'h0000_0A00; // Line 32 (different line from ADDR_X)
 
     reg [31:0] data_out;
     reg        hit_flag;
@@ -282,6 +285,96 @@ module tb_direct_basic;
             errors = errors + 1;
         end else begin
             $display("  PASS: ADDR_X confirmed evicted by conflict!");
+        end
+
+        // --------------------------------------------------------------------
+        // Test 3: Write Hit Verification (Write-Through)
+        // --------------------------------------------------------------------
+        $display("[Test 3] Write Hit Test on ADDR_X (0x%h)", ADDR_X);
+        // Step A: Read ADDR_X so that it is loaded into cache
+        cpu_read(ADDR_X, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'h1111_0000) begin
+            $display("  FAIL: Setup read of ADDR_X expected cache HIT with 11110000, got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: ADDR_X read hits in cache with data %h", data_out);
+        end
+
+        // Step B: Write new value 32'hDEAD_BEEF to ADDR_X (should be a Write Hit)
+        cpu_write(ADDR_X, 32'hDEAD_BEEF, hit_flag);
+        if (!hit_flag) begin
+            $display("  FAIL: Write to cached ADDR_X expected to be a HIT!");
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Write to cached ADDR_X was a verified HIT");
+        end
+
+        // Step C: Verify main memory was updated with the new value (Write-Through)
+        if (u_mem.mem_array[ADDR_X[13:2]] !== 32'hDEAD_BEEF) begin
+            $display("  FAIL: Main memory not updated with DEADBEEF via write-through! Got %h", u_mem.mem_array[ADDR_X[13:2]]);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Main memory successfully updated to DEADBEEF via write-through");
+        end
+
+        // Step D: Read ADDR_X again: must be a HIT returning DEADBEEF (not the old value)
+        cpu_read(ADDR_X, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'hDEAD_BEEF) begin
+            $display("  FAIL: Read back of ADDR_X expected cache HIT returning DEADBEEF, got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Read back of ADDR_X was a verified cache HIT returning updated data %h", data_out);
+        end
+
+        // --------------------------------------------------------------------
+        // Test 4: Write Miss to Different Line (Cache Line Isolation & No-Allocate)
+        // --------------------------------------------------------------------
+        $display("[Test 4] Write Miss to Different Line ADDR_Z (0x%h) vs ADDR_X (0x%h)", ADDR_Z, ADDR_X);
+        // Step A: Ensure ADDR_X is cached (read it)
+        cpu_read(ADDR_X, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'hDEAD_BEEF) begin
+            $display("  FAIL: Setup read of ADDR_X expected cache HIT with DEADBEEF, got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: ADDR_X confirmed cached with data %h", data_out);
+        end
+
+        // Step B: Write MISS to different address in different line (ADDR_Z = 0x0000_0A00)
+        cpu_write(ADDR_Z, 32'hBEEF_CAFE, hit_flag);
+        if (hit_flag) begin
+            $display("  FAIL: Write to uncached ADDR_Z should be a write MISS!");
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Write to uncached ADDR_Z was a verified write MISS");
+        end
+
+        // Verify backing memory was written through for ADDR_Z
+        if (u_mem.mem_array[ADDR_Z[13:2]] !== 32'hBEEF_CAFE) begin
+            $display("  FAIL: Main memory not updated with BEEFCAFE at ADDR_Z! Got %h", u_mem.mem_array[ADDR_Z[13:2]]);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Main memory successfully updated to BEEFCAFE at ADDR_Z");
+        end
+
+        // Step C: Check that ADDR_X is still a HIT afterwards (unaffected by write to ADDR_Z)
+        cpu_read(ADDR_X, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'hDEAD_BEEF) begin
+            $display("  FAIL: ADDR_X should still be a HIT after write to different line! Got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: ADDR_X remains a verified cache HIT returning %h after write to different line", data_out);
+        end
+
+        // Step D: Check that the new address (ADDR_Z) is still a MISS when read first
+        cpu_read(ADDR_Z, data_out, hit_flag);
+        if (hit_flag) begin
+            $display("  FAIL: First read of ADDR_Z expected MISS (No-Write-Allocate check)! Got hit=%0b", hit_flag);
+            errors = errors + 1;
+        end else if (data_out !== 32'hBEEF_CAFE) begin
+            $display("  FAIL: First read of ADDR_Z returned data %h, expected BEEFCAFE", data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: First read of ADDR_Z was a verified MISS returning %h (No-Write-Allocate confirmed)", data_out);
         end
 
         // --------------------------------------------------------------------
