@@ -360,6 +360,44 @@ module tb_lru_directed;
         end
 
         // --------------------------------------------------------------------
+        // Test 9: A WRITE hit must also update the LRU bit
+        // State before (after Test 8): Set0 Way0=C, Way1=B, lru[0]=0 (C is LRU)
+        // --------------------------------------------------------------------
+        test_step = 9;
+        $display("[Step %0d] Write hit must update LRU (protect C, evict B)", test_step);
+
+        // 9a: Write hit on C (Way 0) -> lru[0] becomes 1 (B is now LRU)
+        cpu_write(ADDR_C, 32'h1234_5678, hit_flag);
+        if (!hit_flag) begin
+            $display("  FAIL: 9a expected write HIT on C, got miss");
+            errors = errors + 1;
+        end
+        if (uut_cache.lru[0] !== 1'b1) begin
+            $display("  FAIL: 9a write hit did not update LRU, expected lru[0]=1, got %b", uut_cache.lru[0]);
+            errors = errors + 1;
+        end
+
+        // 9b: Read miss on A in Set 0 -> victim must be Way 1 (B), not Way 0 (C)
+        cpu_read(ADDR_A, data_out, hit_flag);
+        if (hit_flag || data_out !== 32'hAAAA_0001) begin
+            $display("  FAIL: 9b expected miss on A with AAAA0001, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end
+        if (uut_cache.tag0[0] !== ADDR_C[31:9] || uut_cache.tag1[0] !== ADDR_A[31:9]) begin
+            $display("  FAIL: 9b expected Way0=C (kept) and Way1=A (filled over B)");
+            errors = errors + 1;
+        end
+
+        // 9c: C must still HIT and return the value written in 9a
+        cpu_read(ADDR_C, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'h1234_5678) begin
+            $display("  FAIL: 9c expected hit on C with 12345678, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Write hit updated LRU (C kept with new data, B evicted)");
+        end
+
+        // --------------------------------------------------------------------
         // Final Summary Banner
         // --------------------------------------------------------------------
         $display("------------------------------------------------------------");
