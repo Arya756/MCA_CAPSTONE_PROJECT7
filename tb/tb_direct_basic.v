@@ -191,8 +191,15 @@ module tb_direct_basic;
             $display("  PASS: Main memory successfully updated via write-through");
         end
 
-        // Now read back: will miss, fetch block containing our written word, and refill
+        // Now read back: will miss (proving No-Write-Allocate), fetch block containing our written word, and refill
         cpu_read(ADDR_W, data_out, hit_flag);
+        if (hit_flag) begin
+            $display("  FAIL: First read of ADDR_W hit in cache! Expected MISS (No-Write-Allocate violated)");
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: First read of ADDR_W was a verified MISS (No-Write-Allocate confirmed)");
+        end
+
         if (data_out !== 32'hCAFE_BABE) begin
             $display("  FAIL: Read back returned %h, expected CAFEBABE", data_out);
             errors = errors + 1;
