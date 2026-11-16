@@ -14,7 +14,7 @@ A complete, self-contained hardware evaluation kit designed and modeled in Veril
 - **Technical Report (PDF):** `docs/report/Project7_Phase1_Report.pdf` (LaTeX source and Overleaf package in [`docs/report/`](docs/report/), markdown draft in [`docs/REPORT_PHASE1.md`](docs/REPORT_PHASE1.md))
 - Video: TO BE ADDED
 - **Video Script & Schedule:** Available in [`docs/VIDEO_SCRIPT.md`](docs/VIDEO_SCRIPT.md)
-
+- **Video:** [Watch Project Demonstration](https://drive.google.com/file/d/1B7d2TSe9cZEnwfj3pnS_mf10DREnrO-g/view?usp=sharing)
 ---
 
 ## Team Members & Responsibilities
