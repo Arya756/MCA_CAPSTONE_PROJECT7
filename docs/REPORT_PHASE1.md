@@ -8,23 +8,27 @@
 ---
 
 ## Abstract
-*TODO: Member 5 (Report Lead)*  
-Provide a concise 150–250 word summary covering the objective of designing a 1 KB 2-way set-associative cache with True LRU replacement in Verilog HDL, comparing it against an identically sized direct-mapped baseline under write-through no-write-allocate policy, the synthetic trace evaluation methodology, and key experimental findings (including ping-pong conflict immunity and LRU cyclic degradation).
+This report presents the architectural design, cycle-accurate simulation, and comparative evaluation of a 1024-Byte (1 KB) 2-way set-associative level-1 data cache against an identically sized direct-mapped baseline. Both microarchitectures are implemented in synthesizable Verilog HDL with a 16-Byte block size (4 words of 32 bits each), interfacing with a 32-bit CPU bus and a parameterized backing main memory controller under a Write-Through No-Write-Allocate coherence policy. The 2-way cache employs a true Least Recently Used (True LRU) replacement algorithm implemented via a dedicated single-bit-per-set status array, invalid-way priority allocation, and parallel continuous tag comparison. Across a suite of nine deterministic synthetic memory access workloads totaling 3,136 transactions, zero data mismatches were observed against an architectural golden memory model. Experimental evaluation demonstrates the canonical advantage of set associativity on conflict-heavy workloads: under the ping-pong access pattern, the 2-way cache achieves a 99.00% hit rate (424 clock cycles) compared to 0.00% (2,800 clock cycles) for the direct-mapped cache, representing a 6.6× execution speedup. Conversely, on pathological access patterns exceeding set capacity, both designs experience severe degradation: under 3-way cyclic traversal (`cyclic3`), both suffer 0.00% hit rates (4,200 cycles). On a 1.5 KB loop exceeding capacity (`large_loop`), the direct-mapped cache paradoxically outperforms the 2-way cache (25.00% vs 0.00% hit rate, 4,224 vs 5,376 cycles) due to partial line survival across modulo-64 line mappings. Synthesis trade-offs and unbuffered write stalls are analyzed.
 
 ---
 
 ## I. Introduction
-*TODO: Member 5 (Report Lead)*  
-Introduce the memory hierarchy gap between high-speed microprocessors and relatively high-latency main memory. Explain the fundamental principles of spatial and temporal locality. State the motivation for comparing a 2-way set-associative cache against a direct-mapped cache under equal silicon capacity (1 KB) and identical block sizing (16 B), highlighting the trade-offs between hardware complexity, hit rate, and cycle latency.
+The expanding performance disparity between high-performance microprocessor execution pipelines and relatively high-latency dynamic RAM (the memory wall) mandates efficient on-chip cache memory subsystems. Caches mitigate memory latency by exploiting two fundamental locality principles: spatial locality (the likelihood that references near recently accessed data will soon be needed) and temporal locality (the likelihood that recently accessed data will be re-referenced in the near future) [1], [2].
+
+In microprocessor architecture, set associativity represents a core design choice balancing miss rate reduction against hardware complexity and critical path timing [1], [4]. Direct-mapped caches require minimal control logic and only a single tag comparator, offering rapid lookup latency and minimal energy overhead per access. However, because each memory address maps to exactly one predetermined cache line based on its index bits, direct-mapped caches suffer severely from conflict misses when multiple frequently referenced working-set blocks share the same cache line [5]. Set-associative caches alleviate conflict thrashing by allowing a memory block to reside in any of $N$ ways within a designated set, but introduce parallel tag comparators, hit-way multiplexing, and replacement policy tracking logic [1], [4].
+
+The objective of Phase I of Project 7 is to design, implement, and rigorously benchmark a 1 KB 2-way set-associative data cache with True LRU replacement against an identically sized 1 KB direct-mapped baseline in Verilog HDL. To ensure strict fairness, both architectures maintain identical user storage capacity (1024 Bytes), identical block size (16 Bytes / 4 words), identical 32-bit microprocessor byte-address interfaces, and identical backing memory timing parameters. Through extensive cycle-accurate simulation across nine synthetic traces exercising spatial locality, temporal loops, set conflicts, cyclic thrashing, pseudorandom access, and mixed read/write traffic, we evaluate the precise architectural trade-offs between conflict immunity, replacement policy limitations, and hardware resource utilization.
 
 ---
 
 ## II. Literature Review
-*TODO: Member 5 (Report Lead)*  
-Survey foundational cache literature:
-1. Hennessy, J. L., & Patterson, D. A. *Computer Architecture: A Quantitative Approach* (Principles of set associativity, conflict misses, and miss classification into 3Cs: Compulsory, Capacity, Conflict).
-2. Smith, A. J. (1982). "Cache Memories." *ACM Computing Surveys* (Analysis of replacement algorithms, direct-mapped vs set-associative trade-offs).
-3. Mattson, R. L., et al. (1970). "Evaluation techniques for storage hierarchies" (Stack replacement algorithms and LRU optimality bounds).
+The theory and empirical evaluation of cache memory subsystems have been extensively investigated in computer architecture literature:
+
+1. **Miss Classification and Associativity Principles:** Hennessy and Patterson [1] formulated the classical "3Cs" taxonomy of cache misses: compulsory misses (cold starts occurring upon the first reference to a memory block), capacity misses (arising because the cache cannot contain all blocks needed during program execution), and conflict misses (occurring when multiple blocks compete for the same set in direct-mapped or set-associative designs). Set associativity specifically eliminates conflict misses by providing alternative storage slots within each set, approaching the miss rate of a fully associative cache of identical capacity [1].
+2. **Foundational Replacement and Design Trade-offs:** In his seminal survey, A. J. Smith [2] comprehensively analyzed cache memory structures, line sizing, and replacement algorithms. Smith established that Least Recently Used (LRU) replacement consistently yields superior or near-optimal hit ratios among online non-lookahead replacement strategies by directly capturing temporal locality in referenced working sets.
+3. **Stack Algorithms and LRU Optimality:** Mattson et al. [3] proved that LRU belongs to the class of inclusion-property "stack algorithms." In a stack algorithm, the contents of an $N$-way cache are guaranteed to be a strict subset of the contents of an $(N+1)$-way cache for any given reference string, precluding anomalous hit-rate degradation when increasing cache size. However, Mattson et al. also documented the known vulnerability of finite-stack LRU policies to cyclic access sequences where the working set strictly exceeds associativity by one block ($N+1$).
+4. **Quantifying Associativity Benefits:** Hill and Smith [4] introduced trace-driven simulation techniques to isolate the performance impact of associativity. Their empirical findings showed that shifting from a direct-mapped cache to a 2-way set-associative cache provides the single largest marginal reduction in conflict misses, whereas increasing associativity further (to 4-way or 8-way) provides diminishing returns while introducing significant clock-cycle hit-time penalties.
+5. **Conflict Miss Vulnerability of Direct-Mapped Caches:** Jouppi [5] demonstrated that the majority of miss penalties in direct-mapped caches stem from a small number of conflicting lines that repeatedly ping-pong. Jouppi proposed auxiliary structures such as victim caches to address conflict misses without incurring the multiplexing latency of fully set-associative designs, reinforcing the critical need to quantify conflict behavior.
 
 ---
 
@@ -119,16 +123,66 @@ The 2-way set-associative cache datapath consists of two parallel storage ways (
   - *Processor Side:* Handshake via `cpu_req`, `cpu_we`, `cpu_addr`, `cpu_wdata`, `cpu_ready`, and `cpu_rdata`.
   - *Memory Side:* Handshake via `mem_req`, `mem_we`, `mem_addr`, `mem_wdata`, `mem_ready`, and `mem_rdata`.
 
-*(The architectural block diagram created in draw.io is maintained in `docs/img/block_diagram.png`.)*
+*(The complete architectural block diagram was generated via automated script `scripts/make_block_diagram.py` and saved to `docs/img/block_diagram.png`; team members may redraw or adjust it in draw.io for submission if desired.)*
 
 ### C. True LRU Replacement Logic
-*TODO: Member 2 (LRU Logic & Verification)*  
-Detail the single-bit-per-set True LRU tracking mechanism:
-- Meaning of `lru[set]`: pointing to the victim way (`0` for Way 0, `1` for Way 1).
-- Update logic on Read/Write hit: `lru[set] <= ~hit_way`.
-- Update logic on block refill: `lru[set] <= ~victim_way`.
-- Victim priority selection: invalid ways selected first (`!valid0 ? 0 : !valid1 ? 1 : lru[set]`), preventing unnecessary evictions.
-Include the state transition table across the access sequence `A, B, A, C, B, A, C, A, B, C`.
+**Author:** Member 2 (LRU Logic & Verification)
+
+With two ways per set, a memory block can reside in one of two locations. When a read miss occurs in a set where both ways are already occupied with valid data, the cache controller must decide which resident block to evict. The architecture implements true **Least-Recently-Used (True LRU)** replacement: the evicted block is always the block that was accessed longest ago in logical time, exploiting temporal locality [1], [2].
+
+#### 1. Hardware State Tracking
+Each set retains exactly one LRU bit, `lru[set]`, instantiated as a 32 × 1-bit register array across the 32 sets. The bit encodes the *victim way*:
+- `lru[set] == 1'b0`: Way 0 is least recently used (Way 0 is chosen as the eviction victim).
+- `lru[set] == 1'b1`: Way 1 is least recently used (Way 1 is chosen as the eviction victim).
+
+A single bit per set provides a mathematically complete recency representation because a 2-way set has only $2! = 2$ possible recency orderings (either Way 0 was used more recently than Way 1, or Way 1 was used more recently than Way 0). For an $N$-way set, true LRU requires tracking $\lceil \log_2(N!) \rceil$ states (e.g., 5 bits for 4-way, or pseudo-LRU tree structures for larger associativity [1]). In our 2-way architecture, true LRU introduces minimal silicon overhead (exactly 32 flip-flops total).
+
+#### 2. LRU Bit State Update Rules
+The LRU bit for a set is updated synchronously on clock edges in accordance with specific transaction events:
+
+| Event | Microarchitectural Action | State Update Equation | Rationale |
+|---|---|---|---|
+| **Read Hit in Way $w$** | Word delivered to CPU; hit way marked Most Recently Used (MRU) | `lru[req_index] <= ~hit_way` | The complementary way ($\sim w$) becomes the new LRU victim candidate. |
+| **Write Hit in Way $w$** | Word updated in cache array and forwarded to memory; way $w$ marked MRU | `lru[req_index] <= ~hit_way` | Store operations constitute an explicit data access; writing protects the line from immediate eviction. |
+| **Block Refill into Way $v$** | 4-word burst received from memory; allocated into victim way $v$ | `lru[req_index] <= ~victim_way` | The newly refilled block is now MRU; the surviving opposite way becomes LRU. |
+| **Write Miss** | Memory write forwarded directly (No-Write-Allocate) | *No change* | Cache contents are unaffected; LRU recency status is strictly preserved. |
+
+#### 3. Victim Selection Priority Logic
+When servicing a miss during `STATE_LOOKUP`, the controller evaluates way occupancy before consulting the LRU bit:
+```verilog
+wire victim_way = (!valid0[req_index]) ? 1'b0 :
+                  (!valid1[req_index]) ? 1'b1 :
+                  lru[req_index];
+```
+This priority selection enforces an essential architectural rule: **invalid lines are populated first**. Cold cache ways are filled before any valid resident data is evicted. The LRU bit only arbitrates eviction once both `valid0` and `valid1` are asserted.
+
+#### 4. Reference Sequence Evaluation ($A, B, A, C, B, A, C, A, B, C$)
+To verify LRU transition dynamics, consider a deterministic reference sequence where all accesses map to the identical cache set (Set 0):
+
+| Step | Access | Way 0 Tag | Way 1 Tag | `lru` Bit (Victim) | Event Type | Architectural Mechanics |
+|:---:|:---:|:---:|:---:|:---:|:---:|---|
+| **0** | *Reset* | *Invalid* | *Invalid* | `0` | Reset | Both lines initialized invalid (`valid0=0`, `valid1=0`). |
+| **1** | Read $A$ | $A$ | *Invalid* | `1` | Cold Miss | Way 0 invalid → fills Way 0. Refill makes Way 0 MRU → `lru <= 1`. |
+| **2** | Read $B$ | $A$ | $B$ | `0` | Cold Miss | Way 1 invalid → fills Way 1. Refill makes Way 1 MRU → `lru <= 0`. |
+| **3** | Read $A$ | $A$ | $B$ | `1` | Hit | Hit in Way 0. Access makes Way 0 MRU → `lru <= 1`. |
+| **4** | Read $C$ | $A$ | $C$ | `0` | Conflict Miss | Set full; `lru == 1` → victim is Way 1 ($B$ evicted, $A$ retained!). Refill makes Way 1 MRU → `lru <= 0`. |
+| **5** | Read $B$ | $B$ | $C$ | `1` | Conflict Miss | `lru == 0` → victim is Way 0 ($A$ evicted). Refill makes Way 0 MRU → `lru <= 1`. |
+| **6** | Read $A$ | $B$ | $A$ | `0` | Conflict Miss | `lru == 1` → victim is Way 1 ($C$ evicted). Refill makes Way 1 MRU → `lru <= 0`. |
+| **7** | Read $C$ | $C$ | $A$ | `1` | Conflict Miss | `lru == 0` → victim is Way 0 ($B$ evicted). Refill makes Way 0 MRU → `lru <= 1`. |
+| **8** | Read $A$ | $C$ | $A$ | `0` | Hit | Hit in Way 1. Access makes Way 1 MRU → `lru <= 0`. |
+| **9** | Read $B$ | $B$ | $A$ | `1` | Conflict Miss | `lru == 0` → victim is Way 0 ($C$ evicted, $A$ retained). Refill makes Way 0 MRU → `lru <= 1`. |
+| **10** | Read $C$ | $B$ | $C$ | `0` | Conflict Miss | `lru == 1` → victim is Way 1 ($A$ evicted). Refill makes Way 1 MRU → `lru <= 0`. |
+
+*(The complete state table diagram is visualized in `docs/img/lru_sequence.png`.)*
+
+#### 5. Directed Verification Methodology
+The testbench `tb/tb_lru_directed.v` implements ten comprehensive verification assertions:
+1. **Steps 1–2:** Cold misses correctly prioritize invalid ways (Way 0 first, then Way 1).
+2. **Steps 3–6:** Hit on $A$ correctly shifts `lru` to protect $A$, causing subsequent block $C$ to evict $B$.
+3. **Step 7:** Multiple sets operate with strict independence.
+4. **Step 8 (Set Isolation):** Intensive memory traffic in Set 1 does not alter or corrupt the LRU tracking bit of Set 0.
+5. **Step 9 (Write Hit Recency):** Write hits update the LRU status register identically to read hits, protecting modified cached lines.
+6. **Step 10 (Sequence Conformance):** The full 10-step reference sequence above is evaluated cycle-by-cycle against internal registers, achieving zero discrepancies.
 
 ### D. Controller Finite State Machine (FSM) and Timing Analysis
 **Author:** Member 1 (Team Lead)
@@ -361,32 +415,68 @@ To analyze the performance impact of backing memory write stalls under the unbuf
    - For $WR\_LAT = 8$: $103 \times (+4) = +412\text{ cycles}$
 2. **Workload Selectivity:** Traces comprising exclusively read instructions (`seq_stream`, `small_loop`, `pingpong`, `cyclic3`, `strided`, `random`) demonstrate zero cycle variance across $WR\_LAT$ changes, validating that read refill bursts depend solely on $RD\_LAT$. The write-heavy trace `mixed_rw` (103 writes) highlights the substantial CPU stall penalty of unbuffered write-through operations, motivating a write buffer or write-back policy for Phase II.
 
-*TODO: Member 5:*  
-- Add comparative bar charts (`hit_rate.png` and `cycles.png`).
-- Add Yosys synthesis resource utilization table (cell count, flip-flops, wires).
+### C. Hardware Synthesis & Resource Utilization Evaluation
+*Contributed by Member 5 (Report, Diagrams, Synthesis, Video)*  
+*Configuration: Target Verilog modules `rtl/cache_2way_lru.v` and `rtl/cache_direct.v` (Source: `results/yosys_summary.md`)*
+
+To evaluate the hardware area overhead associated with 2-way set associativity and True LRU replacement, both cache microarchitectures were analyzed under generic RTL elaboration using Yosys.
+
+#### 1. Architectural Register Allocation
+Because both cache architectures are modeled behaviorally in synthesizable Verilog using register arrays (`reg [...] data [...]`, `reg [...] tag [...]`, `reg valid [...]`), generic synthesis infers flip-flops for all storage elements:
+
+| Storage Structure | Direct-Mapped Baseline (`cache_direct`) | 2-Way Set-Associative (`cache_2way_lru`) | Delta (2-Way vs Direct) | Architectural Explanation |
+|---|---|---|---|---|
+| **Data Storage Array** | 64 lines × 128 bits = **8,192 bits** | 32 sets × 2 ways × 128 bits = **8,192 bits** | 0 bits (0.0%) | Identical 1024-Byte user data capacity |
+| **Tag Storage Array** | 64 lines × 22 bits = **1,408 bits** | 32 sets × 2 ways × 23 bits = **1,472 bits** | +64 bits (+4.5%) | 23-bit tag vs 22-bit tag (halved set count) |
+| **Valid Bits** | 64 lines × 1 bit = **64 bits** | 32 sets × 2 ways × 1 bit = **64 bits** | 0 bits (0.0%) | 1 valid bit per stored 16-byte block |
+| **LRU Replacement Bit** | **0 bits** (Direct-mapped: no replacement choice) | 32 sets × 1 bit = **32 bits** | +32 bits (New) | 1 True LRU tracking bit per set |
+| **Total Architectural Storage** | **9,664 register bits** | **9,760 register bits** | **+96 register bits (+1.0%)** | Minimal storage delta (1.0% increase) |
+
+#### 2. Combinational Logic and Multiplexing Overhead
+While total storage register requirements increase by only 96 flip-flops (1.0%), the true silicon cost of 2-way set associativity lies in the combinational control and datapath logic:
+1. **Parallel Comparators:** The 2-way cache requires two parallel 23-bit equality comparators (`hit0` and `hit1`) operating concurrently, doubling comparator hardware relative to the single 22-bit comparator of the direct-mapped baseline.
+2. **Hit-Way Data Multiplexing:** Direct-mapped lookup delivers the indexed line data directly. The 2-way cache requires an additional 32-bit 2-to-1 multiplexer steered by `hit_way` to select the hit block, inserting combinational delay into the critical read hit response path.
+3. **Victim Selection & LRU Update Logic:** The 2-way cache incorporates priority multiplexers (`!valid0 ? Way0 : (!valid1 ? Way1 : lru)`) and synchronous toggle logic (`lru <= ~hit_way` on hit, `lru <= ~victim_way` on refill).
+
+#### 3. Synthesis Limits and FPGA Status
+- **Storage Domination:** In generic technology elaboration, flip-flop and cell counts are dominated by the ~8,192 data array registers. In physical ASIC or FPGA implementations, data arrays would map to dedicated SRAM macros or dual-port Block RAM (BRAM) primitives.
+- **Timing and Clock Frequency Limitations:** Yosys generic elaboration provides cell categorization but does not perform technology-specific placement, routing, or static timing analysis. Consequently, physical clock frequency ($F_{\max}$), setup/hold margins, and critical path delays are not measured in Phase I.
+- **Vivado FPGA Synthesis:** Physical FPGA synthesis numbers (LUT, FF, BRAM utilization, and post-implementation $F_{\max}$ via AMD Xilinx Vivado) were not collected during Phase I.
 
 ---
 
 ## V. Individual Contributions
 
-| Member | Assigned Role | Owned Files & Deliverables | Real Commit Count | Status |
-|---|---|---|---|---|
-| **Member 1** | Team Lead & 2-Way RTL | `rtl/cache_2way_lru.v`, `docs/WAVEFORM_GUIDE.md`, `docs/MEMBER1_EXPLAINER.md`, report sections III.A, III.B, III.D | *6 commits on branch member1-rtl-docs* | Complete |
-| **Member 2** | LRU Logic & Verification | `tb/tb_lru_directed.v`, LRU diagram, section III.C | *Checked via git log* | Starter Ready |
-| **Member 3** | Direct Baseline & Memory | `rtl/cache_direct.v`, `rtl/main_memory.v`, `tb/tb_direct_basic.v`, sections III.E, III.F, latency study | 16 commits | Completed |
-| **Member 4** | Traces, Comparison & Scripts | `scripts/gen_traces.py`, `scripts/run_all.sh`, `scripts/plot_results.py`, `tb/tb_compare.v`, `traces/` (9 traces), `results/` (charts & CSV), sections III.G, IV | 6 commits on branch member4-traces-benchmarks | Complete |
-| **Member 5** | Report, Synthesis & Video | `docs/`, `results/yosys_cmd.txt`, IEEE report formatting, video recording | *Checked via git log* | Starter Ready |
+The table below documents individual contributions based on verified git commit history (`git shortlog -sne main`), merged pull requests, and owned architectural deliverables:
+
+| Member | Assigned Role | Owned Deliverables & Files | Merged PR & Branch | Verified Commits on `main` | Status |
+|---|---|---|---|:---:|---|
+| **Member 1** | Team Lead & 2-Way Cache RTL | `rtl/cache_2way_lru.v`, `docs/WAVEFORM_GUIDE.md`, `docs/MEMBER1_EXPLAINER.md`, Report sections III.A, III.B, III.D | PR #1 (`member1-rtl-docs`) | 24 commits (`Arya756`: 21, `Ayush Aryan`: 3) | Complete |
+| **Member 2** | LRU Logic & Verification | `tb/tb_lru_directed.v`, `docs/SECTION_III_C_LRU.md`, `scripts/make_lru_diagram.py`, `docs/img/lru_sequence.png`, Report section III.C | PR #6 (`member2-lru-tests`) | 19 commits (`Aparna Singh`) | Complete |
+| **Member 3** | Direct Baseline & Memory Model | `rtl/cache_direct.v`, `rtl/main_memory.v`, `tb/tb_direct_basic.v`, `docs/BASELINE_AND_MEMORY_MODEL.md`, `docs/section_III_E_F.md`, `scripts/run_latency_study.sh`, latency CSVs, Report sections III.E, III.F | PR #7 (`member3-direct-baseline-memory`) | 6 commits (`Neeraj Singh`)* | Complete |
+| **Member 4** | Traces, Comparison Testbench & Scripts | `scripts/gen_traces.py` (9 traces), `tb/tb_compare.v`, `scripts/run_all.sh`, `scripts/plot_results.py`, `results/hit_rate.png`, `results/cycles.png`, `docs/SECTION_III_G_IV.md`, Report sections III.G, IV | PR #8 (`member4-traces-benchmarks`) | 6 commits (`Atharva Tiwari`) | Complete |
+| **Member 5** | Report Assembly, Synthesis & Video Lead | `docs/REPORT_PHASE1.md` (Abstract, I, II, IV.C, V, VI, References), `docs/report/` (IEEEtran package), `scripts/make_block_diagram.py`, `docs/img/block_diagram.png`, `results/yosys_summary.md`, `README.md` update | PR pending (`member5-report-synthesis`) | 7 commits (`Lalilal0`) | Active / Complete |
+
+*\*Attribution Flag:* All 6 commits for Member 3 were authored under `neerajsingh@Neerajs-MacBook-Pro-2.local` (a local machine domain rather than a verified GitHub email). This is flagged for attribution correction if required before final submission.
 
 ---
 
 ## VI. Conclusion
-*TODO: Member 5 (Report Lead)*  
-Summarize how Phase I achieved complete architectural functional verification and established the baseline performance gap between direct-mapped and 2-way set-associative caches. Outline Phase II roadmap (write-back policy investigation, multi-level hierarchy, Vivado FPGA deployment).
+Phase I of Project 7 successfully designed, functionally verified, and benchmarked a 1024-Byte 2-way set-associative L1 data cache with True LRU replacement against an identically sized direct-mapped baseline in Verilog HDL. Across nine deterministic synthetic workloads comprising 3,136 memory transactions, zero data mismatches were observed against the architectural golden memory model.
+
+The experimental data establishes three primary microarchitectural conclusions:
+1. **Associativity Shields Against Set Conflicts:** On conflict-intensive workloads mapping competing lines to the same index (`pingpong`), the 2-way cache completely eliminates thrashing, delivering a **99.00% hit rate (424 cycles)** versus **0.00% (2,800 cycles)** for the direct-mapped cache—a dramatic **6.6× execution speedup**. In realistic concurrent workloads (`hot_stream`), the second way shields hot data from cold streaming sweeps, improving hit rate from 86.75% to 90.75% and reducing execution time by 13.4% (1,244 vs 1,436 cycles).
+2. **Pathological Degradation on Working Sets Exceeding Associativity:** When the active working set within a set exceeds associativity ($N+1$ blocks) under strict cyclic traversal (`cyclic3`), LRU replacement experiences catastrophic failure, causing 100% evictions and yielding **0.00% hit rate (4,200 cycles)** for both architectures.
+3. **Direct-Mapped Superiority on Medium Loops:** Under workloads whose footprint exceeds cache capacity but remains below $2\times$ capacity (`large_loop`, 1.5 KB working set = 96 blocks across 4 passes), the direct-mapped cache significantly outperforms the 2-way cache (**25.00% hit rate, 4,224 cycles** vs **0.00% hit rate, 5,376 cycles**). While the 2-way cache suffers 3 blocks per set across all 32 sets (triggering complete cyclic LRU thrashing), the direct-mapped cache maps 96 blocks modulo 64, leaving lines 32–63 free of collisions and achieving repeat hits across subsequent loop iterations.
+4. **Write-Through Bottlenecks:** Under unbuffered Write-Through No-Write-Allocate, memory store latency stalls the processor for 7 clock cycles per write regardless of hit or miss status, as demonstrated by the 721 stall cycles incurred across 103 writes in `mixed_rw`.
+
+**Methodological Limitations:** All evaluations were performed via cycle-accurate RTL simulation with generic Yosys elaboration. Because physical synthesis targeting FPGA or ASIC standard cells was not performed, the critical-path hit-time penalty of the 2-way multiplexer and comparators, as well as post-routing $F_{\max}$, were not measured. Furthermore, Phase II implementation plans (including write-back dirty bit tracking, multi-level hierarchy, or FPGA deployment on Vivado) remain **TO CONFIRM**.
 
 ---
 
 ## References
-1. J. L. Hennessy and D. A. Patterson, *Computer Architecture: A Quantitative Approach*, 6th ed., Cambridge, MA: Morgan Kaufmann, 2017.
-2. A. J. Smith, "Cache Memories," *ACM Computing Surveys (CSUR)*, vol. 14, no. 3, pp. 473–530, Sep. 1982.
-3. R. L. Mattson, J. Gecsei, D. R. Slutz, and I. L. Traiger, "Evaluation techniques for storage hierarchies," *IBM Systems Journal*, vol. 9, no. 2, pp. 78–117, 1970.
-4. *TODO: Member 5 to add 2–3 additional IEEE/ACM peer-reviewed references.*
+1. J. L. Hennessy and D. A. Patterson, *Computer Architecture: A Quantitative Approach*, 6th ed., Cambridge, MA, USA: Morgan Kaufmann, 2017.
+2. A. J. Smith, "Cache Memories," *ACM Computing Surveys (CSUR)*, vol. 14, no. 3, pp. 473–530, Sep. 1982, doi: 10.1145/356887.356892.
+3. R. L. Mattson, J. Gecsei, D. R. Slutz, and I. L. Traiger, "Evaluation techniques for storage hierarchies," *IBM Systems Journal*, vol. 9, no. 2, pp. 78–117, 1970, doi: 10.1147/sj.92.0078.
+4. M. D. Hill and A. J. Smith, "Evaluating Associativity in CPU Caches," *IEEE Transactions on Computers*, vol. 38, no. 12, pp. 1612–1630, Dec. 1989, doi: 10.1109/12.40845.
+5. N. P. Jouppi, "Improving direct-mapped cache performance by the addition of a small fully-associative cache and prefetch buffers," in *Proc. 17th Annu. Int. Symp. Comput. Archit. (ISCA)*, Seattle, WA, USA, 1990, pp. 364–373, doi: 10.1145/325164.325157.

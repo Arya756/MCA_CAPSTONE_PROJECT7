@@ -9,10 +9,11 @@ A complete, self-contained hardware evaluation kit designed and modeled in Veril
 
 ---
 
-## Video Presentation
+## Report and Video
 
-- **Video Link:** *[Insert YouTube Unlisted or Google Drive URL Here]*
-- **Script & Schedule:** Available in [`docs/VIDEO_SCRIPT.md`](docs/VIDEO_SCRIPT.md)
+- **Technical Report (PDF):** `docs/report/Project7_Phase1_Report.pdf` (LaTeX source and Overleaf package in [`docs/report/`](docs/report/), markdown draft in [`docs/REPORT_PHASE1.md`](docs/REPORT_PHASE1.md))
+- Video: TO BE ADDED
+- **Video Script & Schedule:** Available in [`docs/VIDEO_SCRIPT.md`](docs/VIDEO_SCRIPT.md)
 
 ---
 
