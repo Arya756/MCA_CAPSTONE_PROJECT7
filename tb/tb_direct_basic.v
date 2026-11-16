@@ -6,10 +6,20 @@
 //               1. Write-through and read-back on the same address.
 //               2. Verification of conflict miss on two addresses mapping to
 //                  the same cache line (direct conflict thrashing).
-//               3. Verification of No-Write-Allocate on write miss.
+//               3. Verification of Write Hit (cache update and memory write-through).
+//               4. Verification of Write Miss to different line (cache isolation
+//                  and no-write-allocate check).
 // ============================================================================
 
 `timescale 1ns / 1ps
+
+`ifndef RD_LAT
+`define RD_LAT 8
+`endif
+
+`ifndef WR_LAT
+`define WR_LAT 4
+`endif
 
 module tb_direct_basic;
 
@@ -36,6 +46,22 @@ module tb_direct_basic;
     wire [31:0] hit_count;
     wire [31:0] miss_count;
     wire [31:0] cycle_count;
+
+    // Memory transaction counter (counts rising edges of mem_req)
+    integer mem_req_count;
+    reg     prev_mem_req;
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            mem_req_count <= 0;
+            prev_mem_req  <= 1'b0;
+        end else begin
+            prev_mem_req <= mem_req;
+            if (mem_req && !prev_mem_req) begin
+                mem_req_count <= mem_req_count + 1;
+            end
+        end
+    end
 
     integer errors;
 
@@ -67,8 +93,8 @@ module tb_direct_basic;
 
     // Instantiate Main Memory Model
     main_memory #(
-        .RD_LAT(8),
-        .WR_LAT(4),
+        .RD_LAT(`RD_LAT),
+        .WR_LAT(`WR_LAT),
         .MEM_WORDS(4096)
     ) u_mem (
         .clk(clk),
@@ -93,7 +119,7 @@ module tb_direct_basic;
         output        was_hit;
         reg [31:0] prev_hits;
         begin
-            @(posedge clk);
+            @(negedge clk);
             prev_hits = hit_count;
             cpu_addr  = addr;
             cpu_we    = 1'b0;
@@ -115,7 +141,7 @@ module tb_direct_basic;
         output        was_hit;
         reg [31:0] prev_hits;
         begin
-            @(posedge clk);
+            @(negedge clk);
             prev_hits = hit_count;
             cpu_addr  = addr;
             cpu_wdata = wdata;
@@ -137,6 +163,7 @@ module tb_direct_basic;
     localparam [31:0] ADDR_X = 32'h0000_0450;
     localparam [31:0] ADDR_Y = 32'h0000_0850;
     localparam [31:0] ADDR_W = 32'h0000_0120; // Line 18
+    localparam [31:0] ADDR_Z = 32'h0000_0A00; // Line 32 (different line from ADDR_X)
 
     reg [31:0] data_out;
     reg        hit_flag;
@@ -150,9 +177,16 @@ module tb_direct_basic;
         cpu_wdata = 0;
         errors    = 0;
 
+        // Initialize VCD waveform output
+        $dumpfile("results/direct_basic.vcd");
+        $dumpvars(0, tb_direct_basic);
+
         // Initialize memory backing array
-        u_mem.mem_array[ADDR_X[13:2]] = 32'h1111_2222;
-        u_mem.mem_array[ADDR_Y[13:2]] = 32'h3333_4444;
+        u_mem.mem_array[ADDR_X[13:2] + 0] = 32'h1111_0000;
+        u_mem.mem_array[ADDR_X[13:2] + 1] = 32'h1111_0001;
+        u_mem.mem_array[ADDR_X[13:2] + 2] = 32'h1111_0002;
+        u_mem.mem_array[ADDR_X[13:2] + 3] = 32'h1111_0003;
+        u_mem.mem_array[ADDR_Y[13:2]]     = 32'h3333_4444;
 
         #20;
         @(posedge clk);
@@ -176,8 +210,15 @@ module tb_direct_basic;
             $display("  PASS: Main memory successfully updated via write-through");
         end
 
-        // Now read back: will miss, fetch block containing our written word, and refill
+        // Now read back: will miss (proving No-Write-Allocate), fetch block containing our written word, and refill
         cpu_read(ADDR_W, data_out, hit_flag);
+        if (hit_flag) begin
+            $display("  FAIL: First read of ADDR_W hit in cache! Expected MISS (No-Write-Allocate violated)");
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: First read of ADDR_W was a verified MISS (No-Write-Allocate confirmed)");
+        end
+
         if (data_out !== 32'hCAFE_BABE) begin
             $display("  FAIL: Read back returned %h, expected CAFEBABE", data_out);
             errors = errors + 1;
@@ -200,16 +241,44 @@ module tb_direct_basic;
         $display("[Test 2] Conflict Miss Test on Line 5 (ADDR_X and ADDR_Y)");
         // Step A: Read ADDR_X -> Miss & Refill
         cpu_read(ADDR_X, data_out, hit_flag);
-        if (hit_flag || data_out !== 32'h1111_2222) begin
-            $display("  FAIL: Cold read ADDR_X should miss!");
+        if (hit_flag || data_out !== 32'h1111_0000) begin
+            $display("  FAIL: Cold read ADDR_X should miss! Expected 11110000, got hit=%0b data=%h", hit_flag, data_out);
             errors = errors + 1;
         end else begin
-            $display("  PASS: ADDR_X cold miss and refilled");
+            $display("  PASS: ADDR_X cold miss and refilled with data %h", data_out);
+        end
+
+        // Step A.1: Spatial locality checks - read other words in the same refilled block
+        // Word 1: ADDR_X + 4
+        cpu_read(ADDR_X + 4, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'h1111_0001) begin
+            $display("  FAIL: Read ADDR_X+4 expected HIT and value 11110001, got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: ADDR_X+4 hit in cache with data %h", data_out);
+        end
+
+        // Word 2: ADDR_X + 8
+        cpu_read(ADDR_X + 8, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'h1111_0002) begin
+            $display("  FAIL: Read ADDR_X+8 expected HIT and value 11110002, got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: ADDR_X+8 hit in cache with data %h", data_out);
+        end
+
+        // Word 3: ADDR_X + 12
+        cpu_read(ADDR_X + 12, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'h1111_0003) begin
+            $display("  FAIL: Read ADDR_X+12 expected HIT and value 11110003, got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: ADDR_X+12 hit in cache with data %h", data_out);
         end
 
         // Step B: Read ADDR_X again -> HIT
         cpu_read(ADDR_X, data_out, hit_flag);
-        if (!hit_flag) begin
+        if (!hit_flag || data_out !== 32'h1111_0000) begin
             $display("  FAIL: Repeated read of ADDR_X should HIT!");
             errors = errors + 1;
         end else begin
@@ -227,7 +296,7 @@ module tb_direct_basic;
 
         // Step D: Read ADDR_X again -> must MISS because ADDR_Y evicted it
         cpu_read(ADDR_X, data_out, hit_flag);
-        if (hit_flag) begin
+        if (hit_flag || data_out !== 32'h1111_0000) begin
             $display("  FAIL: ADDR_X should have missed because it was evicted by conflict!");
             errors = errors + 1;
         end else begin
@@ -235,8 +304,107 @@ module tb_direct_basic;
         end
 
         // --------------------------------------------------------------------
-        // Final Summary Banner
+        // Test 3: Write Hit Verification (Write-Through)
         // --------------------------------------------------------------------
+        $display("[Test 3] Write Hit Test on ADDR_X (0x%h)", ADDR_X);
+        // Step A: Read ADDR_X so that it is loaded into cache
+        cpu_read(ADDR_X, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'h1111_0000) begin
+            $display("  FAIL: Setup read of ADDR_X expected cache HIT with 11110000, got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: ADDR_X read hits in cache with data %h", data_out);
+        end
+
+        // Step B: Write new value 32'hDEAD_BEEF to ADDR_X (should be a Write Hit)
+        cpu_write(ADDR_X, 32'hDEAD_BEEF, hit_flag);
+        if (!hit_flag) begin
+            $display("  FAIL: Write to cached ADDR_X expected to be a HIT!");
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Write to cached ADDR_X was a verified HIT");
+        end
+
+        // Step C: Verify main memory was updated with the new value (Write-Through)
+        if (u_mem.mem_array[ADDR_X[13:2]] !== 32'hDEAD_BEEF) begin
+            $display("  FAIL: Main memory not updated with DEADBEEF via write-through! Got %h", u_mem.mem_array[ADDR_X[13:2]]);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Main memory successfully updated to DEADBEEF via write-through");
+        end
+
+        // Step D: Read ADDR_X again: must be a HIT returning DEADBEEF (not the old value)
+        cpu_read(ADDR_X, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'hDEAD_BEEF) begin
+            $display("  FAIL: Read back of ADDR_X expected cache HIT returning DEADBEEF, got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Read back of ADDR_X was a verified cache HIT returning updated data %h", data_out);
+        end
+
+        // --------------------------------------------------------------------
+        // Test 4: Write Miss to Different Line (Cache Line Isolation & No-Allocate)
+        // --------------------------------------------------------------------
+        $display("[Test 4] Write Miss to Different Line ADDR_Z (0x%h) vs ADDR_X (0x%h)", ADDR_Z, ADDR_X);
+        // Step A: Ensure ADDR_X is cached (read it)
+        cpu_read(ADDR_X, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'hDEAD_BEEF) begin
+            $display("  FAIL: Setup read of ADDR_X expected cache HIT with DEADBEEF, got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: ADDR_X confirmed cached with data %h", data_out);
+        end
+
+        // Step B: Write MISS to different address in different line (ADDR_Z = 0x0000_0A00)
+        cpu_write(ADDR_Z, 32'hBEEF_CAFE, hit_flag);
+        if (hit_flag) begin
+            $display("  FAIL: Write to uncached ADDR_Z should be a write MISS!");
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Write to uncached ADDR_Z was a verified write MISS");
+        end
+
+        // Verify backing memory was written through for ADDR_Z
+        if (u_mem.mem_array[ADDR_Z[13:2]] !== 32'hBEEF_CAFE) begin
+            $display("  FAIL: Main memory not updated with BEEFCAFE at ADDR_Z! Got %h", u_mem.mem_array[ADDR_Z[13:2]]);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Main memory successfully updated to BEEFCAFE at ADDR_Z");
+        end
+
+        // Step C: Check that ADDR_X is still a HIT afterwards (unaffected by write to ADDR_Z)
+        cpu_read(ADDR_X, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'hDEAD_BEEF) begin
+            $display("  FAIL: ADDR_X should still be a HIT after write to different line! Got hit=%0b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: ADDR_X remains a verified cache HIT returning %h after write to different line", data_out);
+        end
+
+        // Step D: Check that the new address (ADDR_Z) is still a MISS when read first
+        cpu_read(ADDR_Z, data_out, hit_flag);
+        if (hit_flag) begin
+            $display("  FAIL: First read of ADDR_Z expected MISS (No-Write-Allocate check)! Got hit=%0b", hit_flag);
+            errors = errors + 1;
+        end else if (data_out !== 32'hBEEF_CAFE) begin
+            $display("  FAIL: First read of ADDR_Z returned data %h, expected BEEFCAFE", data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: First read of ADDR_Z was a verified MISS returning %h (No-Write-Allocate confirmed)", data_out);
+        end
+
+        // --------------------------------------------------------------------
+        // Final Summary Banner & Memory Transaction Verification
+        // --------------------------------------------------------------------
+        $display("------------------------------------------------------------");
+        $display("MEMORY TRANSACTION MONITOR:");
+        $display("  Observed memory transactions (rising edges of mem_req): %0d", mem_req_count);
+        $display("  Expected memory transactions (read misses + writes):     %0d", 8);
+        if (mem_req_count == 8) begin
+            $display("  Transaction Count Comparison: MATCH (Observed %0d == Expected %0d)", mem_req_count, 8);
+        end else begin
+            $display("  Transaction Count Comparison: MISMATCH! (Observed %0d != Expected %0d)", mem_req_count, 8);
+        end
         $display("------------------------------------------------------------");
         if (errors == 0) begin
             $display("Direct-Mapped Basic Tests Summary: ALL CHECKS PASSED!");

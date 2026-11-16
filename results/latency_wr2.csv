@@ -1,0 +1,15 @@
+trace,design,accesses,hits,misses,hit_rate,cycles
+seq_stream,2way,256,192,64,75.00,1280
+seq_stream,direct,256,192,64,75.00,1280
+small_loop,2way,640,624,16,97.50,1472
+small_loop,direct,640,624,16,97.50,1472
+pingpong,2way,200,198,2,99.00,424
+pingpong,direct,200,0,200,0.00,2800
+cyclic3,2way,300,0,300,0.00,4200
+cyclic3,direct,300,0,300,0.00,4200
+strided,2way,256,248,8,96.88,608
+strided,direct,256,248,8,96.88,608
+random,2way,300,22,278,7.33,3936
+random,direct,300,18,282,6.00,3984
+mixed_rw,2way,300,244,56,81.33,1293
+mixed_rw,direct,300,244,56,81.33,1293

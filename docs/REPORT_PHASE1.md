@@ -218,19 +218,39 @@ Total Write Latency = 1 (CPU dispatch) + 1 (Cache lookup & mem request) + 4 (Mem
 *(Detailed GTKWave waveforms, signal lists, and zoom windows are documented in [`docs/WAVEFORM_GUIDE.md`](WAVEFORM_GUIDE.md).)*
 
 ### E. Write Policy
-*TODO: Member 3 (Direct-Mapped Baseline & Memory Model)*  
-Explain the rationale and operational mechanics of the **Write-Through, No-Write-Allocate** policy:
-- **Write Hit:** Updates data word in matching cache line/way, updates LRU bit, and writes through to main memory.
-- **Write Miss (No-Write-Allocate):** Sends write directly to main memory without allocating or refilling a cache line. Prevents cache pollution on write-only streams.
-- Trade-off analysis: Simplicity and memory coherence vs increased memory bus traffic.
+In both cache architectures, memory store transactions are governed by a **Write-Through, No-Write-Allocate** policy. This policy was deliberately chosen for Phase I to guarantee absolute cache-memory coherence while minimizing controller control path complexity.
+
+1. **Write Hit Operation:**
+   - **Direct-Mapped Cache (`cache_direct`):** During `STATE_LOOKUP`, when `valid_array[req_index] == 1` and `tag_array[req_index] == req_tag`, a write hit occurs. The controller updates the targeted 32-bit word in `data_array[req_index][req_word_sel]` and immediately transitions to `STATE_WRITE_THROUGH`. The write transaction is forwarded across the memory bus (`mem_req = 1`, `mem_we = 1`, `mem_addr = req_addr`, `mem_wdata = req_wdata`), holding until `mem_ready` asserts after `WR_LAT` cycles (default 4 cycles).
+   - **2-Way Set-Associative Cache (`cache_2way_lru`):** Tag comparators evaluate Way 0 and Way 1 in parallel. Upon a hit in Way 0 or Way 1, the corresponding way's data array (`data0` or `data1`) is updated. Concurrently, the set's LRU tracking bit is updated (`lru[req_set] <= ~hit_way`) so that the accessed way is marked as most recently used. The write is simultaneously propagated to `main_memory` via `STATE_WRITE_THROUGH`.
+
+2. **Write Miss Operation (No-Write-Allocate):**
+   - When a write request targets an address not currently cached (tag mismatch or valid bit deasserted), neither architecture allocates a cache line or initiates a block refill.
+   - The write is dispatched directly to `main_memory` in `STATE_WRITE_THROUGH`. 
+   - **Cache Pollution Prevention:** No-Write-Allocate ensures that write-only memory streams (such as `memset`, array initialization, or streaming buffer outputs) do not evict active, hot lines from the cache, thereby preserving working-set temporal locality for subsequent reads.
+
+3. **Trade-Off Analysis:**
+   - *Advantages:* Simplifies hardware implementation by eliminating dirty bits, per-line modified flags, and write-back eviction buffers. Memory and cache remain perfectly synchronized at all times, drastically simplifying system recovery, DMA snooping, and multi-core consistency.
+   - *Disadvantages:* Every store transaction incurs backing memory write latency (`WR_LAT = 4` cycles), creating higher memory bus contention during write-dense workload phases compared to write-back caching.
 
 ### F. Fair Comparison Methodology
-*TODO: Member 3 (Direct-Mapped Baseline & Memory Model)*  
-Detail the fairness controls enforced across both experimental setups:
-- Identical 1 KB capacity and 16-byte block granularity.
-- Identical memory bus timing (8-cycle read burst latency `RD_LAT`, 4-cycle write latency `WR_LAT`).
-- Same write policy (write-through no-write-allocate).
-- Identical cycle counting and transaction semantics.
+To establish rigorous empirical rigor, the comparative analysis between the direct-mapped baseline and the 2-way set-associative cache enforces strict architectural controls, ensuring that observed hit rate and cycle count variances arise solely from cache associativity:
+
+1. **Storage Capacity and Organization Parity:**
+   - Both caches provide exactly **1024 Bytes (1 KB)** of user data capacity.
+   - Both caches operate with an identical **16-byte block size** (4 words per block), requiring identical burst transaction bandwidth from backing memory.
+   - The direct-mapped baseline is organized as 64 lines (Index: 6 bits, Tag: 22 bits), whereas the 2-way design is organized as 32 sets of 2 ways (Index: 5 bits, Tag: 23 bits). The aggregate storage is identical ($64 \times 16\text{ B} = 32 \times 2 \times 16\text{ B} = 1024\text{ B}$).
+
+2. **Identical Memory Subsystem & Bus Timings:**
+   - Both DUTs are benchmarked against the identical backing memory module (`rtl/main_memory.v`).
+   - Block refill latency is uniformly fixed to `RD_LAT = 8` cycles followed by a 4-cycle burst (14 active cycles total miss latency).
+   - Word write latency is uniformly fixed to `WR_LAT = 4` cycles (5 active cycles total write latency).
+
+3. **Symmetrical Active Cycle Counting:**
+   - Execution cycles are monitored strictly during active processor service cycles (from `cpu_req = 1` until `cpu_ready = 1`). Idle intervals between trace stimuli are excluded to avoid artificial skew from testbench delays.
+
+4. **Independent Sequential Passes & Golden Memory Verification:**
+   - The comparison testbench (`tb/tb_compare.v`) executes each trace through `cache_2way_lru` and `cache_direct` in isolated passes with identical initial memory contents and cold-cache states, cross-checking all read outputs against an independent architectural golden memory array. Across all benchmark traces, zero data mismatches are observed.
 
 ### G. Evaluation Traces & Locality Patterns
 *TODO: Member 4 (Traces, Comparison Testbench, Scripts)*  
@@ -248,8 +268,9 @@ Document the 7 synthetic workloads generated by `scripts/gen_traces.py` and the 
 ---
 
 ## IV. Results & Comparative Analysis
-*TODO: Member 4 & Member 5*  
-Insert the experimental results from `results/results.csv`:
+*Baseline Configuration: RD_LAT=8, WR_LAT=4, 32-bit addresses, 16-byte block size (Source: `results/results.csv`)*
+
+The experimental evaluation below was gathered from the full regression suite using 32-bit address traces, with backing memory parameters set to `RD_LAT = 8` cycles and `WR_LAT = 4` cycles. All numbers are extracted directly from cycle-accurate simulation logs:
 
 | Trace Name | Design | Total Accesses | Hits | Misses | Hit Rate (%) | Total Cycles |
 |---|---|---|---|---|---|---|
@@ -268,6 +289,70 @@ Insert the experimental results from `results/results.csv`:
 | `mixed_rw` | 2-Way LRU | 300 | 244 | 56 | 81.33% | 1,499 |
 | `mixed_rw` | Direct-Mapped | 300 | 244 | 56 | 81.33% | 1,499 |
 
+### A. Memory Read Latency Sensitivity Study (RD_LAT = 4, 8, 16 Cycles)
+*Contributed by Member 3 (Direct-Mapped Baseline & Memory Model)*  
+*Configuration: RD_LAT ∈ {4, 8, 16}, WR_LAT=4, 32-bit addresses, 16-byte blocks (Sources: `results/latency_rd4.csv`, `results/latency_rd8.csv`, `results/latency_rd16.csv`, consolidated in `results/latency_sensitivity.csv`)*
+
+To evaluate cache resilience against varying memory subsystem delays, a full regression sweep was executed with read latency parameters $RD\_LAT \in \{4, 8, 16\}$ clock cycles. The table below illustrates the cycle impact across all 7 benchmark workloads (consolidated in `results/latency_sensitivity.csv`):
+
+| Trace Name | Architecture | Accesses | Misses | Hit Rate | Cycles (RD_LAT=4) | Cycles (RD_LAT=8) | Cycles (RD_LAT=16) | Delta (8 → 4) | Delta (8 → 16) |
+|---|---|---|---|---|---|---|---|---|---|
+| `seq_stream` | 2-Way LRU | 256 | 64 | 75.00% | 1,024 | 1,280 | 1,792 | -256 (-20.0%) | +512 (+40.0%) |
+| `seq_stream` | Direct-Mapped | 256 | 64 | 75.00% | 1,024 | 1,280 | 1,792 | -256 (-20.0%) | +512 (+40.0%) |
+| `small_loop` | 2-Way LRU | 640 | 16 | 97.50% | 1,408 | 1,472 | 1,600 | -64 (-4.3%) | +128 (+8.7%) |
+| `small_loop` | Direct-Mapped | 640 | 16 | 97.50% | 1,408 | 1,472 | 1,600 | -64 (-4.3%) | +128 (+8.7%) |
+| `pingpong` | 2-Way LRU | 200 | 2 | 99.00% | 416 | 424 | 440 | -8 (-1.9%) | +16 (+3.8%) |
+| `pingpong` | Direct-Mapped | 200 | 200 | 0.00% | 2,000 | 2,800 | 4,400 | -800 (-28.6%) | +1,600 (+57.1%) |
+| `cyclic3` | 2-Way LRU | 300 | 300 | 0.00% | 3,000 | 4,200 | 6,600 | -1,200 (-28.6%) | +2,400 (+57.1%) |
+| `cyclic3` | Direct-Mapped | 300 | 300 | 0.00% | 3,000 | 4,200 | 6,600 | -1,200 (-28.6%) | +2,400 (+57.1%) |
+| `strided` | 2-Way LRU | 256 | 8 | 96.88% | 576 | 608 | 672 | -32 (-5.3%) | +64 (+10.5%) |
+| `strided` | Direct-Mapped | 256 | 8 | 96.88% | 576 | 608 | 672 | -32 (-5.3%) | +64 (+10.5%) |
+| `random` | 2-Way LRU | 300 | 278 | 7.33% | 2,824 | 3,936 | 6,160 | -1,112 (-28.3%) | +2,224 (+56.5%) |
+| `random` | Direct-Mapped | 300 | 282 | 6.00% | 2,856 | 3,984 | 6,240 | -1,128 (-28.3%) | +2,256 (+56.6%) |
+| `mixed_rw` | 2-Way LRU | 300 | 56 | 81.33% | 1,371 | 1,499 | 1,755 | -128 (-8.5%) | +256 (+17.1%) |
+| `mixed_rw` | Direct-Mapped | 300 | 56 | 81.33% | 1,371 | 1,499 | 1,755 | -128 (-8.5%) | +256 (+17.1%) |
+
+**Key Architectural Insights from Read Latency Sensitivity:**
+1. **Linear Scaling with Miss Penalty:** The cycle variance across memory latency settings follows the exact analytical relationship:
+   $$\Delta\text{cycles} = (\text{read misses}) \times (\Delta RD\_LAT)$$
+   Shifting $RD\_LAT$ from 8 to 4 decreases execution time by exactly 4 cycles per read miss, while increasing $RD\_LAT$ to 16 adds exactly 8 cycles per read miss.
+2. **Associativity as a Latency Buffer:** On conflict-prone traces such as `pingpong`, the 2-way associative cache experiences only 2 cold misses, causing its total execution time to increase by a mere 3.8% (424 to 440 cycles) when memory latency doubles. In stark contrast, the direct-mapped cache suffers 200 conflict misses, resulting in a 57.1% cycle increase (2,800 to 4,400 cycles). This demonstrates that set associativity effectively shields the CPU from off-chip memory latency bottlenecks.
+3. **Simulation-Verified Read vs. Write Miss Decomposition in `mixed_rw`:** Across the 300 instructions of `mixed_rw.txt` (197 reads, 103 writes), the cache logs 244 hits and 56 misses. Direct cycle-accurate simulation measures the exact breakdown: **165 read hits, 32 read misses, 79 write hits, and 24 write misses**. Under No-Write-Allocate, write misses do not trigger block refills, meaning execution cycles scale solely with the 32 read misses:
+   $$\Delta\text{cycles} = 32 \times (\Delta RD\_LAT)$$
+   - For $RD\_LAT = 4$: $32 \times (-4) = -128\text{ cycles}$
+   - For $RD\_LAT = 16$: $32 \times (+8) = +256\text{ cycles}$
+   This confirms analytical and simulation parity to the exact single cycle.
+
+### B. Memory Write Latency Sensitivity Study (WR_LAT = 2, 4, 8 Cycles)
+*Contributed by Member 3 (Direct-Mapped Baseline & Memory Model)*  
+*Configuration: WR_LAT ∈ {2, 4, 8}, RD_LAT=8, 32-bit addresses, 16-byte blocks (Sources: `results/latency_wr2.csv`, `results/latency_wr4.csv`, `results/latency_wr8.csv`)*
+
+To analyze the performance impact of backing memory write stalls under the unbuffered Write-Through policy, a parameter sweep was conducted across write latencies $WR\_LAT \in \{2, 4, 8\}$ cycles (with $RD\_LAT = 8$ held constant):
+
+| Trace Name | Architecture | Accesses | Writes | Cycles (WR_LAT=2) | Cycles (WR_LAT=4) | Cycles (WR_LAT=8) | Delta (4 → 2) | Delta (4 → 8) | Analytical Verification |
+|---|---|---|---|---|---|---|---|---|---|
+| `seq_stream` | 2-Way LRU | 256 | 0 | 1,280 | 1,280 | 1,280 | 0 | 0 | Read-only workload |
+| `seq_stream` | Direct-Mapped | 256 | 0 | 1,280 | 1,280 | 1,280 | 0 | 0 | Read-only workload |
+| `small_loop` | 2-Way LRU | 640 | 0 | 1,472 | 1,472 | 1,472 | 0 | 0 | Read-only workload |
+| `small_loop` | Direct-Mapped | 640 | 0 | 1,472 | 1,472 | 1,472 | 0 | 0 | Read-only workload |
+| `pingpong` | 2-Way LRU | 200 | 0 | 424 | 424 | 424 | 0 | 0 | Read-only workload |
+| `pingpong` | Direct-Mapped | 200 | 0 | 2,800 | 2,800 | 2,800 | 0 | 0 | Read-only workload |
+| `cyclic3` | 2-Way LRU | 300 | 0 | 4,200 | 4,200 | 4,200 | 0 | 0 | Read-only workload |
+| `cyclic3` | Direct-Mapped | 300 | 0 | 4,200 | 4,200 | 4,200 | 0 | 0 | Read-only workload |
+| `strided` | 2-Way LRU | 256 | 0 | 608 | 608 | 608 | 0 | 0 | Read-only workload |
+| `strided` | Direct-Mapped | 256 | 0 | 608 | 608 | 608 | 0 | 0 | Read-only workload |
+| `random` | 2-Way LRU | 300 | 0 | 3,936 | 3,936 | 3,936 | 0 | 0 | Read-only workload |
+| `random` | Direct-Mapped | 300 | 0 | 3,984 | 3,984 | 3,984 | 0 | 0 | Read-only workload |
+| **`mixed_rw`** | **2-Way LRU** | **300** | **103** | **1,293** | **1,499** | **1,911** | **-206** | **+412** | **★ Exact: 103 × (-2) = -206 cycles, 103 × (+4) = +412 cycles** |
+| **`mixed_rw`** | **Direct-Mapped** | **300** | **103** | **1,293** | **1,499** | **1,911** | **-206** | **+412** | **★ Exact: 103 × (-2) = -206 cycles, 103 × (+4) = +412 cycles** |
+
+**Key Architectural Insights from Write Latency Sensitivity:**
+1. **Direct Write-Stall Correlation:** Because Phase I uses an unbuffered Write-Through policy, every store instruction stalls the processor for exactly $WR\_LAT$ memory cycles regardless of whether it hit or missed in the cache. The cycle variance follows:
+   $$\Delta\text{cycles} = (\text{writes}) \times (\Delta WR\_LAT)$$
+   - For $WR\_LAT = 2$: $103 \times (-2) = -206\text{ cycles}$
+   - For $WR\_LAT = 8$: $103 \times (+4) = +412\text{ cycles}$
+2. **Workload Selectivity:** Traces comprising exclusively read instructions (`seq_stream`, `small_loop`, `pingpong`, `cyclic3`, `strided`, `random`) demonstrate zero cycle variance across $WR\_LAT$ changes, validating that read refill bursts depend solely on $RD\_LAT$. The write-heavy trace `mixed_rw` (103 writes) highlights the substantial CPU stall penalty of unbuffered write-through operations, motivating a write buffer or write-back policy for Phase II.
+
 *TODO: Member 5:*  
 - Add comparative bar charts (`hit_rate.png` and `cycles.png`).
 - Add Yosys synthesis resource utilization table (cell count, flip-flops, wires).
@@ -280,7 +365,7 @@ Insert the experimental results from `results/results.csv`:
 |---|---|---|---|---|
 | **Member 1** | Team Lead & 2-Way RTL | `rtl/cache_2way_lru.v`, `docs/WAVEFORM_GUIDE.md`, `docs/MEMBER1_EXPLAINER.md`, report sections III.A, III.B, III.D | *6 commits on branch member1-rtl-docs* | Complete |
 | **Member 2** | LRU Logic & Verification | `tb/tb_lru_directed.v`, LRU diagram, section III.C | *Checked via git log* | Starter Ready |
-| **Member 3** | Direct Baseline & Memory | `rtl/cache_direct.v`, `rtl/main_memory.v`, `tb/tb_direct_basic.v`, sections III.E, III.F | *Checked via git log* | Starter Ready |
+| **Member 3** | Direct Baseline & Memory | `rtl/cache_direct.v`, `rtl/main_memory.v`, `tb/tb_direct_basic.v`, sections III.E, III.F, latency study | 16 commits | Completed |
 | **Member 4** | Traces, Comparison & Scripts | `scripts/gen_traces.py`, `scripts/run_all.sh`, `tb/tb_compare.v`, `traces/`, sections III.G, IV | *Checked via git log* | Starter Ready |
 | **Member 5** | Report, Synthesis & Video | `docs/`, `results/yosys_cmd.txt`, IEEE report formatting, video recording | *Checked via git log* | Starter Ready |
 

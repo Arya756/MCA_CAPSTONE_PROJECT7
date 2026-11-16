@@ -6,7 +6,7 @@
 //              - Word-addressed backing storage of 4096 32-bit words (16 KB).
 //              - Parameterized Read Latency (RD_LAT, default 8 cycles).
 //              - Parameterized Write Latency (WR_LAT, default 4 cycles).
-//              - Overridable via compilation flags (e.g. iverilog -PRD_LAT=4).
+//              - Overridable via compilation flags (e.g. iverilog -DRD_LAT=4 in the testbench).
 //
 // BLOCK-READ PROTOCOL:
 // 1. Master asserts `mem_req = 1`, `mem_we = 0`, and provides `mem_addr`.

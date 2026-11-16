@@ -14,6 +14,14 @@
 
 `timescale 1ns / 1ps
 
+`ifndef RD_LAT
+`define RD_LAT 8
+`endif
+
+`ifndef WR_LAT
+`define WR_LAT 4
+`endif
+
 module tb_compare;
 
     reg clk;
@@ -82,6 +90,7 @@ module tb_compare;
     // Diagnostics for latency sanity checks
     integer measured_read_hit_lat;
     integer measured_read_miss_lat;
+    reg [1023:0] csv_filename;
 
     // ------------------------------------------------------------------------
     // DUT Instantiations
@@ -113,8 +122,8 @@ module tb_compare;
     );
 
     main_memory #(
-        .RD_LAT(8),
-        .WR_LAT(4),
+        .RD_LAT(`RD_LAT),
+        .WR_LAT(`WR_LAT),
         .MEM_WORDS(4096)
     ) mem_2way_inst (
         .clk(clk),
@@ -153,8 +162,8 @@ module tb_compare;
     );
 
     main_memory #(
-        .RD_LAT(8),
-        .WR_LAT(4),
+        .RD_LAT(`RD_LAT),
+        .WR_LAT(`WR_LAT),
         .MEM_WORDS(4096)
     ) mem_direct_inst (
         .clk(clk),
@@ -399,8 +408,8 @@ module tb_compare;
                          (acc_cycles_dir == (saved_hits_dir*measured_read_hit_lat + saved_misses_dir*measured_read_miss_lat)) ? "EXACT" : "MISMATCH");
             end
 
-            // Append rows to results/results.csv
-            csv_fd = $fopen("results/results.csv", "a");
+            // Append rows to results CSV
+            csv_fd = $fopen(csv_filename, "a");
             if (csv_fd != 0) begin
                 $fdisplay(csv_fd, "%0s,2way,%0d,%0d,%0d,%0.2f,%0d",
                           trace_name, trace_accesses_2w, saved_hits_2w, saved_misses_2w, hit_rate_2w, acc_cycles_2w);
@@ -426,9 +435,13 @@ module tb_compare;
         measured_read_hit_lat   = 0;
         measured_read_miss_lat  = 0;
 
+        if (!$value$plusargs("CSV=%s", csv_filename)) begin
+            csv_filename = "results/results.csv";
+        end
+
         // Initialize CSV file with clean header
         if (!$value$plusargs("TRACE=%s", cli_trace)) begin
-            init_csv_fd = $fopen("results/results.csv", "w");
+            init_csv_fd = $fopen(csv_filename, "w");
             if (init_csv_fd != 0) begin
                 $fdisplay(init_csv_fd, "trace,design,accesses,hits,misses,hit_rate,cycles");
                 $fclose(init_csv_fd);
