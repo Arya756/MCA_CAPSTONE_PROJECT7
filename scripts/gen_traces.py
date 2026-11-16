@@ -4,14 +4,16 @@ Trace Generator for Cache Evaluation
 Project 7 - 2-Way Set-Associative vs Direct-Mapped Cache
 Owner: Member 4 (Traces, Comparison Testbench, Scripts)
 
-Generates 7 deterministic memory access traces into traces/ directory:
-1. seq_stream.txt: Sequential word accesses with 4B stride (~75% hit rate).
-2. small_loop.txt: Tight 256B loop that fits inside 1KB cache (~97.5% hit rate).
-3. pingpong.txt: Alternating 2 addresses in same set (favors 2-way: 99% vs 0%).
-4. cyclic3.txt: 3-way cyclic conflict on same set (hurts LRU: 0% hit rate).
-5. strided.txt: 64B strided access, hitting every 4th set.
-6. random.txt: Deterministic uniform random word accesses (seed 42).
-7. mixed_rw.txt: Hot region with 70% reads and 30% writes (tests write-through).
+Generates 9 deterministic memory access traces into traces/ directory:
+1. seq_stream.txt:  Sequential word accesses with 4B stride (~75% hit rate).
+2. small_loop.txt:  Tight 256B loop that fits inside 1KB cache (~97.5% hit rate).
+3. pingpong.txt:    Alternating 2 addresses in same set (favors 2-way: 99% vs 0%).
+4. cyclic3.txt:     3-way cyclic conflict on same set (hurts LRU: 0% hit rate).
+5. strided.txt:     64B strided access, hitting every 4th set.
+6. random.txt:      Deterministic uniform random word accesses (seed 42).
+7. mixed_rw.txt:    Hot region with 70% reads and 30% writes (tests write-through).
+8. large_loop.txt:  ~1.5KB loop exceeding cache capacity (capacity/conflict misses).
+9. hot_stream.txt:  Read-mostly stream with a hot 128B region + cold 2KB sweep.
 
 All addresses are word-aligned and strictly kept within the 4096-word (16 KB)
 main_memory capacity range: 0x00000000 to 0x00003FFC.
@@ -177,6 +179,84 @@ def gen_mixed_rw():
             ops.append(("R", addr))
     write_trace("mixed_rw.txt", "Hot region with 70% reads and 30% writes (tests write-through)", ops)
 
+def gen_large_loop():
+    """
+    T8: Large Loop (~1.5 KB Working Set) (400 operations)
+    Locality Pattern: Strong temporal locality BUT working set EXCEEDS 1 KB cache
+    capacity. A loop of 384 words = 1536 bytes (96 cache blocks of 16B each)
+    is iterated 4 times. Since the working set (1.5 KB) exceeds the cache
+    capacity (1 KB), conflict and capacity misses are expected.
+    Expected Result:
+      - Direct-Mapped (64 lines): 1536B / 16B = 96 blocks need 96 lines,
+        but only 64 lines are available. 32 blocks (33%) will thrash on each
+        pass. First pass: 96 cold misses. Subsequent passes: ~32 conflict
+        misses per pass from the 32 contending lines.
+      - 2-Way (32 sets, 64 blocks total): 96 blocks in 32 sets = 3 blocks per
+        set on average. Some sets see 2 or fewer (all cached), while some see
+        3+ (LRU evictions). The 2-way cache should have noticeably fewer
+        conflict misses than direct-mapped due to the extra associativity
+        absorbing some of the conflicts.
+    """
+    ops = []
+    base_addr = 0x0000
+    num_words = 384  # 384 words = 1536 bytes = 1.5 KB
+    iterations = 4
+    # 4 passes over 1.5 KB data region to stress capacity/conflict misses
+    for _ in range(iterations):
+        # Read every 4th word (one per block) to maximize block coverage
+        # while keeping operation count manageable
+        for w in range(num_words):
+            if w % 4 == 0:  # Sample one word per block
+                ops.append(("R", base_addr + w * 4))
+    write_trace("large_loop.txt",
+                "1.5KB loop exceeding cache capacity (tests capacity/conflict misses)", ops)
+
+
+def gen_hot_stream():
+    """
+    T9: Read-Mostly Stream with Hot Region (400 operations)
+    Locality Pattern: Models a realistic workload with a HOT region that is
+    accessed frequently (high temporal locality) and a COLD streaming region
+    that is traversed linearly (high spatial, low temporal locality).
+    - Hot Region: 128 bytes (8 blocks) at addresses 0x1000-0x107F, accessed
+      ~70% of the time with random reads within the region.
+    - Cold Stream: 2048 bytes (128 blocks) at addresses 0x2000-0x27FF,
+      accessed ~30% of the time with sequential reads that advance linearly.
+    Expected Result:
+      - The hot region (128B = 8 blocks) fits entirely within 1 KB cache in
+        both designs, so hot region accesses should be mostly hits after warmup.
+      - The cold stream sweeps through many sets. In the direct-mapped cache,
+        cold stream blocks may conflict with hot region blocks depending on
+        index mapping, potentially evicting hot data. In the 2-way cache, the
+        extra way provides a buffer to keep hot blocks cached even as cold
+        stream data flows through the same sets.
+      - The 2-way cache should show a measurable hit rate advantage over the
+        direct-mapped cache due to better conflict tolerance for the hot
+        region under cold stream pressure.
+    """
+    random.seed(99999)
+    ops = []
+    hot_base = 0x1000   # Hot region: 128 bytes (0x1000 to 0x107F)
+    hot_words = 32       # 32 words = 128 bytes
+    cold_base = 0x2000   # Cold stream: 2048 bytes (0x2000 to 0x27FF)
+    cold_words = 512     # 512 words = 2048 bytes
+    cold_ptr = 0         # Linear pointer into cold stream
+
+    for _ in range(400):
+        if random.random() < 0.70:
+            # Hot region: random read within 128-byte working set
+            word_idx = random.randint(0, hot_words - 1)
+            ops.append(("R", hot_base + word_idx * 4))
+        else:
+            # Cold stream: sequential read advancing linearly
+            addr = cold_base + (cold_ptr % cold_words) * 4
+            ops.append(("R", addr))
+            cold_ptr += 1
+
+    write_trace("hot_stream.txt",
+                "Read-mostly stream with hot 128B region + cold 2KB linear sweep", ops)
+
+
 def main():
     os.makedirs(TRACES_DIR, exist_ok=True)
     print("Generating deterministic traces in traces/ ...")
@@ -187,7 +267,9 @@ def main():
     gen_strided()
     gen_random()
     gen_mixed_rw()
-    print("All 7 traces generated successfully.")
+    gen_large_loop()
+    gen_hot_stream()
+    print("All 9 traces generated successfully.")
 
 if __name__ == "__main__":
     main()
