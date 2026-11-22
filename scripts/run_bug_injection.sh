@@ -4,9 +4,10 @@
 # Owner:   Member 2 (LRU and replacement verification)
 #
 # Purpose: Prove the LRU tests can actually catch mistakes.
-#   1. Control run : real RTL must PASS.
+#   1. Control run : real RTL must PASS both testbenches.
 #   2. Mutants     : each deliberately broken COPY of the RTL (made in a temp
-#                    directory, the real RTL is never modified) must FAIL.
+#                    directory, the real RTL is never modified) must FAIL the
+#                    directed testbench. Most must also fail the random test.
 # Usage:   ./scripts/run_bug_injection.sh      (run from the repo root)
 # ==============================================================================
 set -uo pipefail
@@ -19,52 +20,61 @@ cd "$REPO_ROOT"
 RTL=rtl/cache_2way_lru.v
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-failures=0
+problems=0
 
-run_case () {            # $1 = label, $2 = rtl file, $3 = expected (PASS|FAIL)
-    local label="$1" file="$2" expect="$3" out verdict
-    if ! iverilog -g2012 -o "$TMP/sim.vvp" "$file" rtl/main_memory.v tb/tb_lru_directed.v 2>"$TMP/err.txt"; then
-        echo "  [$label] COMPILE ERROR"; cat "$TMP/err.txt"; failures=$((failures+1)); return
+# run_tb <rtl file> <testbench file> <pass marker>  -> prints PASS or FAIL
+run_tb () {
+    local file="$1" tb="$2" marker="$3" out
+    if ! iverilog -g2012 -o "$TMP/sim.vvp" "$file" rtl/main_memory.v "$tb" 2>"$TMP/err.txt"; then
+        echo "COMPILE-ERROR"; return
     fi
     out="$(vvp "$TMP/sim.vvp")"
-    if echo "$out" | grep -q "LRU test: PASS"; then verdict="PASS"; else verdict="FAIL"; fi
-    local nfail; nfail=$(echo "$out" | grep -c "FAIL:")
-    if [ "$verdict" = "$expect" ]; then
-        echo "  [$label] testbench verdict = $verdict ($nfail failing checks)  -> as expected"
-    else
-        echo "  [$label] testbench verdict = $verdict, expected $expect  -> PROBLEM"
-        failures=$((failures+1))
-    fi
+    if echo "$out" | grep -q "$marker"; then echo "PASS"; else echo "FAIL"; fi
 }
 
-make_mutant () {         # $1 = name, $2 = sed expression, $3 = description
+# check <label> <rtl file> <exp directed> <exp random>
+check () {
+    local label="$1" file="$2" exp_d="$3" exp_r="$4" got_d got_r status="ok"
+    got_d="$(run_tb "$file" tb/tb_lru_directed.v "LRU test: PASS")"
+    got_r="$(run_tb "$file" tb/tb_lru_random.v   "Random test: PASS")"
+    if [ "$got_d" != "$exp_d" ] || [ "$got_r" != "$exp_r" ]; then
+        status="PROBLEM"; problems=$((problems+1))
+    fi
+    printf "  %-24s directed: %-5s random: %-5s (expected %s / %s)  %s\n" \
+           "$label" "$got_d" "$got_r" "$exp_d" "$exp_r" "$status"
+}
+
+make_mutant () {   # <name> <sed expression> <description> <expected random verdict>
     sed "$2" "$RTL" > "$TMP/$1.v"
     if cmp -s "$RTL" "$TMP/$1.v"; then
-        echo "  [$1] mutation did NOT apply (pattern not found) -> PROBLEM"; failures=$((failures+1)); return
+        echo "  [$1] mutation did NOT apply (pattern not found) -> PROBLEM"; problems=$((problems+1)); return
     fi
     echo "  Bug: $3"
-    run_case "$1" "$TMP/$1.v" FAIL
+    check "$1" "$TMP/$1.v" FAIL "$4"
 }
 
 echo "=== Bug-injection check for the 2-way LRU cache ==="
-echo "Control (real RTL, must pass):"
-run_case "control" "$RTL" PASS
+echo "Control (real RTL, both testbenches must pass):"
+check "control" "$RTL" PASS PASS
 
-echo "Mutants (each must be caught by tb_lru_directed):"
-make_mutant bug1_hit_update    's/lru\[req_index\] <= ~hit_way;/lru[req_index] <= hit_way;/' \
-            "hit update flipped (lru <= hit_way instead of ~hit_way)"
-make_mutant bug2_refill_update 's/lru\[req_index\] <= ~victim_way;/lru[req_index] <= victim_way;/' \
-            "refill update flipped (lru <= victim_way instead of ~victim_way)"
+echo "Mutants (directed test must catch every one):"
+make_mutant bug1_hit_update      's/lru\[req_index\] <= ~hit_way;/lru[req_index] <= hit_way;/' \
+            "hit update flipped (lru <= hit_way instead of ~hit_way)" FAIL
+make_mutant bug2_refill_update   's/lru\[req_index\] <= ~victim_way;/lru[req_index] <= victim_way;/' \
+            "refill update flipped (lru <= victim_way instead of ~victim_way)" FAIL
 make_mutant bug3_victim_polarity 's/^\( *\)lru\[req_index\];/\1~lru[req_index];/' \
-            "victim choice inverted when both ways are valid"
-make_mutant bug4_ignore_valid  "s/(!valid0\[req_index\]) ? 1'b0 :/1'b0 ? 1'b0 :/;s/(!valid1\[req_index\]) ? 1'b1 :/1'b0 ? 1'b1 :/" \
-            "victim ignores valid bits (empty way not used first)"
+            "victim choice inverted when both ways are valid" FAIL
+# bug4 cannot change behaviour in normal operation: after reset the LRU bit already
+# points at the empty way. Random traffic therefore cannot see it; only the directed
+# test 12 (which forces the LRU bit) can.
+make_mutant bug4_ignore_valid    "s/(!valid0\[req_index\]) ? 1'b0 :/1'b0 ? 1'b0 :/;s/(!valid1\[req_index\]) ? 1'b1 :/1'b0 ? 1'b1 :/" \
+            "victim ignores valid bits (empty way not used first)" PASS
 
 echo "==================================================="
-if [ "$failures" -eq 0 ]; then
-    echo "BUG-INJECTION RESULT: OK (real RTL passes, all mutants caught)"
+if [ "$problems" -eq 0 ]; then
+    echo "BUG-INJECTION RESULT: OK (real RTL passes, every mutant caught by the directed test)"
     exit 0
 else
-    echo "BUG-INJECTION RESULT: $failures problem(s)"
+    echo "BUG-INJECTION RESULT: $problems problem(s)"
     exit 1
 fi
