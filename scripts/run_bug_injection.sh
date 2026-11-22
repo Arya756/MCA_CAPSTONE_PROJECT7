@@ -57,6 +57,8 @@ make_mutant bug2_refill_update 's/lru\[req_index\] <= ~victim_way;/lru[req_index
             "refill update flipped (lru <= victim_way instead of ~victim_way)"
 make_mutant bug3_victim_polarity 's/^\( *\)lru\[req_index\];/\1~lru[req_index];/' \
             "victim choice inverted when both ways are valid"
+make_mutant bug4_ignore_valid  "s/(!valid0\[req_index\]) ? 1'b0 :/1'b0 ? 1'b0 :/;s/(!valid1\[req_index\]) ? 1'b1 :/1'b0 ? 1'b1 :/" \
+            "victim ignores valid bits (empty way not used first)"
 
 echo "==================================================="
 if [ "$failures" -eq 0 ]; then
