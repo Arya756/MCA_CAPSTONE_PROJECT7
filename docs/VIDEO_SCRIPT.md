@@ -22,5 +22,5 @@
 - [ ] Rehearse timing with a stopwatch; ensure total time is strictly under 4:45.
 - [ ] Screen resolution set to 1080p (1920x1080) with clear, high-contrast terminal fonts.
 - [ ] Audio levels balanced across all 5 team members.
-- [ ] Video uploaded to YouTube (Unlisted) or Google Drive (public link).
-- [ ] Final video link pasted into `README.md`.
+- [x] Phase I video uploaded and archived: [Watch Phase I Project Demonstration](https://drive.google.com/file/d/1B7d2TSe9cZEnwfj3pnS_mf10DREnrO-g/view?usp=sharing)
+- [ ] Phase II demonstration recorded and reviewed by all team members.
