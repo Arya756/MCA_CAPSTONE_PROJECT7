@@ -28,7 +28,7 @@ Invalid ways are used first so that a set is filled before any valid block is ev
 
 > **Fig. X.** LRU state of one set over A,B,A,C,B,A,C,A,B,C. Source: `docs/img/lru_sequence.png`.
 
-**Verification.** `tb/tb_lru_directed.v` checks the LRU logic with ten directed steps. The expected outcomes were derived by hand before running, and each step checks hit or miss, the data returned and, in the later steps, the internal way contents and the `lru` bit.
+**Verification.** `tb/tb_lru_directed.v` checks the LRU logic with twelve directed steps. The expected outcomes were derived by hand before running, and each step checks hit or miss, the data returned and, in the later steps, the internal way contents and the `lru` bit.
 
 | Step | What it checks |
 |---|---|
@@ -38,8 +38,24 @@ Invalid ways are used first so that a set is filled before any valid block is ev
 | 8 | Traffic in Set 1 does not change Set 0's LRU bit or its victim choice |
 | 9 | A write hit updates LRU, so the written block is protected and the other way is evicted |
 | 10 | The full sequence A,B,A,C,B,A,C,A,B,C matches Fig. X after every access |
+| 11 | A write miss does not allocate, evict or change the LRU bit, and the write still reaches memory (write-through) |
+| 12 | An empty way is chosen before the LRU way, even when the LRU bit points at the valid way (the bit is forced for this test) |
 
-All ten steps pass, and the full regression reports 0 data mismatches.
+All twelve steps pass, and the full regression reports 0 data mismatches.
+
+**Random reference-model test.** `tb/tb_lru_random.v` sends the same pseudo-random sequence of 5000 reads and writes (fixed seed, about 35 % writes, 6 sets with 5 competing blocks each) to the RTL and to a behavioural reference model of a 2-way LRU, write-through, no-write-allocate cache. After every access it compares the hit/miss result, the returned word and the valid bits, tags and LRU bit of the accessed set; at the end it compares the hit/miss counters and the whole main memory. In the reference run the model saw 2013 hits, 2987 misses and 1926 LRU evictions, and all 5000 accesses matched.
+
+**Bug-injection check.** To show the tests can fail, `scripts/run_bug_injection.sh` makes four deliberately broken copies of the RTL (the real file is never changed) and runs both testbenches on each:
+
+| Broken copy | Directed test | Random test |
+|---|---|---|
+| Real RTL (control) | PASS | PASS |
+| Hit update flipped (`lru <= hit_way`) | FAIL | FAIL |
+| Refill update flipped (`lru <= victim_way`) | FAIL | FAIL |
+| Victim choice inverted when both ways valid | FAIL | FAIL |
+| Victim ignores valid bits | FAIL | PASS |
+
+The last row is expected. After reset the LRU bit already points at the empty way, so ignoring the valid bits cannot change behaviour under normal traffic, and random operations cannot expose it. Only directed step 12, which forces the LRU bit onto the valid way, catches it.
 
 ## LRU part of the Discussion (Section V)
 
