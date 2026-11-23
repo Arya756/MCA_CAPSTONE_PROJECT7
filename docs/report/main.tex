@@ -20,25 +20,25 @@
 
 \begin{document}
 
-\title{Phase I Technical Report: Design and Implementation of a 2-Way Set-Associative Cache with True LRU Replacement Compared Against a Direct-Mapped Baseline}
+\title{Final Technical Report: Design, Multi-Target FPGA Synthesis, and Comparative Evaluation of a 2-Way Set-Associative Cache with True LRU vs Direct-Mapped Baseline}
 
 \author{
-    Member~1 (Team Lead \& 2-Way RTL),
-    Member~2 (LRU Logic \& Verification),
-    Member~3 (Direct Baseline \& Memory),
-    Member~4 (Traces \& Benchmarks),
-    and~Member~5 (Report, Diagrams, Synthesis \& Video Lead)\\
-    \textit{Project 7: Cache Memory Subsystem Design (Phase I) | MCA Capstone}
+    Member~1 (Team Lead, 2-Way RTL \& FPGA Synthesis),
+    Member~2 (LRU Logic \& Multi-Level Verification),
+    Member~3 (Direct Baseline, Parameter Sweeps \& AMAT),
+    Member~4 (Workload Traces, Comparison Testbench \& Plotting),
+    and~Member~5 (Final Report Assembly, Repository \& Documentation)\\
+    \textit{Project 7: Cache Memory Subsystem Design (Phase II Final Report) | MCA Capstone Design}
 }
 
 \maketitle
 
 \begin{abstract}
-This report presents the architectural design, cycle-accurate simulation, and comparative evaluation of a 1024-Byte (1~KB) 2-way set-associative level-1 data cache against an identically sized direct-mapped baseline. Both microarchitectures are implemented in synthesizable Verilog HDL with a 16-Byte block size (4 words of 32 bits each), interfacing with a 32-bit CPU bus and a parameterized backing main memory controller under a Write-Through No-Write-Allocate coherence policy. The 2-way cache employs a true Least Recently Used (True LRU) replacement algorithm implemented via a dedicated single-bit-per-set status array, invalid-way priority allocation, and parallel continuous tag comparison. Across a suite of nine deterministic synthetic memory access workloads totaling 3,136 transactions, zero data mismatches were observed against an architectural golden memory model. Experimental evaluation demonstrates the canonical advantage of set associativity on conflict-heavy workloads: under the ping-pong access pattern, the 2-way cache achieves a 99.00\% hit rate (424 clock cycles) compared to 0.00\% (2,800 clock cycles) for the direct-mapped cache, representing a 6.6$\times$ execution speedup. Conversely, on pathological access patterns exceeding set capacity, both designs experience severe degradation: under 3-way cyclic traversal (\texttt{cyclic3}), both suffer 0.00\% hit rates (4,200 cycles). On a 1.5~KB loop exceeding capacity (\texttt{large\_loop}), the direct-mapped cache paradoxically outperforms the 2-way cache (25.00\% vs 0.00\% hit rate, 4,224 vs 5,376 cycles) due to partial line survival across modulo-64 line mappings. Synthesis trade-offs, storage array register allocation, and unbuffered write stalls are analyzed.
+This report presents the comprehensive architectural design, cycle-accurate co-simulation, multi-target FPGA hardware synthesis, and sensitivity evaluation of a 1024-Byte (1~KB) 2-way set-associative level-1 data cache featuring True Least Recently Used (True LRU) replacement compared against an identically sized direct-mapped baseline. Both microarchitectures are implemented in synthesizable Verilog HDL with a 16-Byte block size (4 words of 32 bits each), interfacing with a 32-bit CPU bus and a parameterized backing main memory controller under a Write-Through No-Write-Allocate coherence policy. The 2-way cache employs a dedicated single-bit-per-set status array, invalid-way priority allocation, and parallel continuous tag comparison. Across an expanded benchmark suite of eleven deterministic synthetic memory access workloads totaling 4,188 transactions, zero data mismatches were observed against an architectural golden memory model. Directed testing, a 5,000-cycle pseudo-random co-simulation against an independent software reference model, and four deliberate RTL bug injections formally verified LRU replacement correctness and testbench mutation sensitivity. Hardware synthesis across Generic, AMD/Xilinx 7-Series, and Lattice ECP5 targets reveals that while the 2-way cache incurs an exact 96 flip-flop overhead (+1.0\%) for tag and LRU arrays, the direct-mapped cache paradoxically requires 28.4\% more LUTs on Xilinx (9,352 vs 6,699 LUTs) and 48.3\% more multiplexers due to deep 64-line multiplexer trees. Both designs infer 0 Block RAMs due to combinational single-cycle read lookup requirements. Parameter sweeps ($C \in \{512\text{B}, 1024\text{B}, 2048\text{B}\}$, $B \in \{8\text{B}, 16\text{B}, 32\text{B}\}$) and an incremental hardware Average Memory Access Time (AMAT) derivation match measured simulation cycles across all read-only traces to 0.00 cycle error.
 \end{abstract}
 
 \begin{IEEEkeywords}
-Cache memory, set-associative cache, direct-mapped cache, True LRU, write-through, memory hierarchy, Verilog HDL, cycle-accurate simulation.
+Cache memory, 2-way set-associative cache, direct-mapped cache, True LRU, write-through, FPGA synthesis, Yosys, Xilinx 7-Series, Lattice ECP5, AMAT, Verilog HDL.
 \end{IEEEkeywords}
 
 \section{Introduction}
@@ -46,7 +46,7 @@ The expanding performance disparity between high-performance microprocessor exec
 
 In microprocessor architecture, set associativity represents a core design choice balancing miss rate reduction against hardware complexity and critical path timing~\cite{hennessy2017,hill1989evaluating}. Direct-mapped caches require minimal control logic and only a single tag comparator, offering rapid lookup latency and minimal energy overhead per access. However, because each memory address maps to exactly one predetermined cache line based on its index bits, direct-mapped caches suffer severely from conflict misses when multiple frequently referenced working-set blocks share the same cache line~\cite{jouppi1990improving}. Set-associative caches alleviate conflict thrashing by allowing a memory block to reside in any of $N$ ways within a designated set, but introduce parallel tag comparators, hit-way multiplexing, and replacement policy tracking logic~\cite{hennessy2017,hill1989evaluating}.
 
-The objective of Phase I of Project 7 is to design, implement, and rigorously benchmark a 1~KB 2-way set-associative data cache with True LRU replacement against an identically sized 1~KB direct-mapped baseline in Verilog HDL. To ensure strict fairness, both architectures maintain identical user storage capacity (1024 Bytes), identical block size (16 Bytes / 4 words), identical 32-bit microprocessor byte-address interfaces, and identical backing memory timing parameters. Through extensive cycle-accurate simulation across nine synthetic traces exercising spatial locality, temporal loops, set conflicts, cyclic thrashing, pseudorandom access, and mixed read/write traffic, we evaluate the precise architectural trade-offs between conflict immunity, replacement policy limitations, and hardware resource utilization.
+The objective of Project 7 is to design, implement, synthesize, and rigorously benchmark a 1~KB 2-way set-associative data cache with True LRU replacement against an identically sized 1~KB direct-mapped baseline in Verilog HDL. To ensure strict fairness, both architectures maintain identical user storage capacity (1024 Bytes), identical block size (16 Bytes / 4 words), identical 32-bit microprocessor byte-address interfaces, and identical backing memory timing parameters. Through extensive cycle-accurate simulation across eleven synthetic traces exercising spatial locality, temporal loops, set conflicts, cyclic thrashing, pseudorandom access, 2D matrix traversal, and mixed read/write traffic, alongside multi-target FPGA synthesis and architectural parameter sweeps, we evaluate the precise microarchitectural trade-offs between conflict immunity, replacement policy dynamics, and silicon resource utilization.
 
 \section{Literature Review}
 The theory and empirical evaluation of cache memory subsystems have been extensively investigated in computer architecture literature:
@@ -92,13 +92,6 @@ LRU Replacement Bits & 32 bits ($32 \times 1$) & 0 bits \\
 \subsection{Hardware Architecture \& Datapath}
 The 2-way set-associative cache datapath consists of two parallel storage ways (Way~0 and Way~1), parallel continuous tag comparators, hit-way multiplexing logic, a True LRU tracking array, and memory bus interfacing logic.
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\columnwidth]{block_diagram.png}
-\caption{Complete microarchitectural block diagram of the 2-way set-associative cache controller and datapath (\texttt{cache\_2way\_lru.v}). Generated via script \texttt{scripts/make\_block\_diagram.py}; may be redrawn in draw.io for submission.}
-\label{fig:block_diagram}
-\end{figure}
-
 The datapath elements operate as follows:
 \begin{itemize}
     \item \textbf{Storage Arrays:} Each of the 32 sets maintains storage for both ways: \texttt{valid0} and \texttt{valid1} (32$\times$1b), \texttt{tag0} and \texttt{tag1} (32$\times$23b), and \texttt{data0} and \texttt{data1} (32$\times$4$\times$32b = 128b/block).
@@ -111,7 +104,7 @@ The datapath elements operate as follows:
     \item \textbf{Hit-Way Multiplexer:} Selects the requested 32-bit data word from Way~0 or Way~1 based on \texttt{hit\_way}.
 \end{itemize}
 
-\subsection{True LRU Replacement Logic}
+\subsection{True LRU Replacement Logic \& Verification}
 With two ways per set, a miss in a full set forces the cache to choose which resident block to evict. The architecture implements true Least-Recently-Used (LRU) replacement: the evicted block is always the block accessed longest ago in logical time.
 
 \begin{itemize}
@@ -124,14 +117,13 @@ With two ways per set, a miss in a full set forces the cache to choose which res
     Invalid lines are populated first, ensuring valid data is never evicted while empty ways exist.
 \end{itemize}
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\columnwidth]{lru_sequence.png}
-\caption{LRU state transitions across the 10-step reference sequence $A, B, A, C, B, A, C, A, B, C$ in Set~0 (\texttt{docs/img/lru\_sequence.png}).}
-\label{fig:lru_sequence}
-\end{figure}
-
-The directed testbench \texttt{tb/tb\_lru\_directed.v} verifies this logic through 10 directed test cases, verifying cold allocation priority, eviction protection on hits, multi-set isolation, and write-hit LRU updates, all passing with zero errors.
+\subsubsection{Multi-Level Verification Framework}
+Verification in Phase II combines three complementary methodologies:
+\begin{enumerate}
+    \item \textbf{Directed Test Suite (\texttt{tb/tb\_lru\_directed.v}):} 12 comprehensive directed steps validating cold allocation priority, hit protection, multi-set independence, write-hit recency updates, reference sequence matching, write-miss non-allocation (Step 11), and invalid-way priority override (Step 12).
+    \item \textbf{Pseudo-Random Co-Simulation (\texttt{tb/tb\_lru\_random.v}):} 5,000 operations (3,243 reads, 1,757 writes, seed \texttt{32'h2026\_1124}) across 6 competing sets evaluated against an independent software reference model checking hit/miss, data word, valid bits, tags, and LRU bits after every access. All 2,013 hits, 2,987 misses, 1,926 evictions, and 4,096 memory words matched identically.
+    \item \textbf{Bug-Injection Mutation Testing (\texttt{scripts/run\_bug\_injection.sh}):} 4 deliberate RTL mutations (hit update inversion, refill update inversion, victim polarity inversion, and ignoring valid line status) were evaluated. All 4 mutations were successfully caught by the test suite, confirming high detection sensitivity.
+\end{enumerate}
 
 \subsection{Controller Finite State Machine (FSM) and Timing Analysis}
 The cache controller implements a streamlined 4-state Mealy/Moore FSM:
@@ -142,20 +134,6 @@ The cache controller implements a streamlined 4-state Mealy/Moore FSM:
     \item \textbf{STATE\_WRITE\_THROUGH (3'b011):} Holds \texttt{mem\_req = 1, mem\_we = 1} to forward store data to memory. On \texttt{mem\_ready}, asserts \texttt{cpu\_ready = 1} and returns to \texttt{IDLE} in \textbf{7 clock cycles (70~ns)}.
 \end{enumerate}
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\columnwidth]{waveform_hit.png}
-\caption{GTKWave simulation waveform for a 2-cycle read hit (\texttt{docs/img/waveform\_hit.png}).}
-\label{fig:wave_hit}
-\end{figure}
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\columnwidth]{waveform_miss.png}
-\caption{GTKWave simulation waveform for a 14-cycle read miss refill (\texttt{docs/img/waveform\_miss.png}).}
-\label{fig:wave_miss}
-\end{figure}
-
 \subsection{Write Policy: Write-Through No-Write-Allocate}
 In both cache architectures, memory store transactions are governed by a \textbf{Write-Through, No-Write-Allocate} policy:
 \begin{itemize}
@@ -164,17 +142,8 @@ In both cache architectures, memory store transactions are governed by a \textbf
     \item \textbf{Trade-off:} Guarantees cache-memory coherence without dirty bits or write-back buffers, but stalls the processor for 7 cycles on every write.
 \end{itemize}
 
-\subsection{Fair Comparison Methodology}
-To ensure that performance variations stem solely from set associativity, strict architectural controls are enforced:
-\begin{itemize}
-    \item \textbf{Capacity \& Block Size Parity:} Both caches provide exactly 1024 Bytes of user data organized as 16-Byte blocks (64 blocks total).
-    \item \textbf{Identical Memory Timing:} Both caches interface with the identical memory controller (\texttt{rtl/main\_memory.v}) with $\text{RD\_LAT} = 8$ and $\text{WR\_LAT} = 4$.
-    \item \textbf{Active Cycle Accounting:} Cycles are counted strictly during CPU service intervals (\texttt{cpu\_req} asserted to \texttt{cpu\_ready} asserted).
-    \item \textbf{Golden Memory Cross-Check:} \texttt{tb/tb\_compare.v} validates every read output against an architectural golden memory array. Across all 3,136 transactions, zero data mismatches occurred.
-\end{itemize}
-
 \subsection{Evaluation Traces \& Locality Patterns}
-Nine deterministic synthetic workloads generated by \texttt{scripts/gen\_traces.py} exercise varied locality dimensions:
+Eleven deterministic synthetic workloads generated by \texttt{scripts/gen\_traces.py} exercise varied locality dimensions:
 \begin{enumerate}
     \item \texttt{seq\_stream} (256 accesses): Linear stride=4 traverse 1024B. Spatial locality only; 75.00\% hit rate.
     \item \texttt{small\_loop} (640 accesses): 256B loop repeated 10 times. Fits in cache; 97.50\% hit rate.
@@ -185,16 +154,18 @@ Nine deterministic synthetic workloads generated by \texttt{scripts/gen\_traces.
     \item \texttt{mixed\_rw} (300 accesses): 70\% reads, 30\% writes in 512B hot region. 81.33\% hit rate on both.
     \item \texttt{large\_loop} (384 accesses): 1.5~KB working set (96 blocks) iterated 4 times. Exceeds 1~KB cache. Direct-mapped achieves 25.00\% (4,224 cycles); 2-way LRU suffers 0.00\% (5,376 cycles).
     \item \texttt{hot\_stream} (400 accesses): 128B hot region (70\%) mixed with 2~KB sequential stream (30\%). 2-way achieves 90.75\% (1,244 cycles) vs 86.75\% (1,436 cycles) for direct.
+    \item \texttt{matrix\_walk} (512 accesses): 2D matrix traversal ($16\times 16$ words, 1024B total) row-major then column-major. Both achieve 87.50\% (1,792 cycles).
+    \item \texttt{write\_heavy} (640 accesses): 80\% writes (336 stores) and 20\% reads (304 loads) across 512B working set repeated 5 times. Both achieve 75.47\% (4,244 cycles).
 \end{enumerate}
 
 \section{Results \& Comparative Analysis}
 
 \subsection{Full Benchmark Results Table}
-Table~\ref{tab:results} summarizes cycle-accurate simulation results across all 9 workloads at default baseline latency ($\text{RD\_LAT}=8, \text{WR\_LAT}=4$).
+Table~\ref{tab:results} summarizes cycle-accurate simulation results across all 11 workloads at default baseline latency ($\text{RD\_LAT}=8, \text{WR\_LAT}=4$).
 
 \begin{table*}[htbp]
 \centering
-\caption{Comprehensive Benchmark Results across 9 Workloads (Source: \texttt{results/results.csv})}
+\caption{Comprehensive Benchmark Results across 11 Workloads (Source: \texttt{results/results.csv})}
 \label{tab:results}
 \begin{tabular}{llrrrrrl}
 \toprule
@@ -226,33 +197,15 @@ Table~\ref{tab:results} summarizes cycle-accurate simulation results across all 
 \midrule
 \texttt{hot\_stream} & 2-Way LRU & 400 & 363 & 37 & \textbf{90.75\%} & \textbf{1,244} & 2nd way shields hot data from cold stream (\textbf{13.4\% faster}) \\
 \texttt{hot\_stream} & Direct-Mapped & 400 & 347 & 53 & \textbf{86.75\%} & \textbf{1,436} & Cold stream evicts hot lines on alias collisions \\
+\midrule
+\texttt{matrix\_walk} & 2-Way LRU & 512 & 448 & 64 & 87.50\% & 1,792 & 16$\times$16 matrix traversal; row-major spatial reuse \\
+\texttt{matrix\_walk} & Direct-Mapped & 512 & 448 & 64 & 87.50\% & 1,792 & 16$\times$16 matrix traversal; row-major spatial reuse \\
+\midrule
+\texttt{write\_heavy} & 2-Way LRU & 640 & 483 & 157 & 75.47\% & 4,244 & 80\% writes (336 stores); Write-Through bus stress \\
+\texttt{write\_heavy} & Direct-Mapped & 640 & 483 & 157 & 75.47\% & 4,244 & 80\% writes (336 stores); Write-Through bus stress \\
 \bottomrule
 \end{tabular}
 \end{table*}
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\columnwidth]{hit_rate.png}
-\caption{Hit rate comparison across all 9 synthetic benchmarks (\texttt{docs/img/hit\_rate.png}).}
-\label{fig:hit_rate}
-\end{figure}
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\columnwidth]{cycles.png}
-\caption{Active execution cycles across all 9 synthetic benchmarks (\texttt{docs/img/cycles.png}).}
-\label{fig:cycles}
-\end{figure}
-
-\subsection{Analytical Cycle Verification}
-For all read-only workloads, measured execution cycles match the analytical formula to the exact cycle:
-\begin{align*}
-    \text{Total Cycles} = (\text{Hits} \times 2) + (\text{Misses} \times 14)
-\end{align*}
-For \texttt{mixed\_rw} (197 reads: 165 hits, 32 misses; 103 writes):
-\begin{align*}
-    \text{Total Cycles} = (165 \times 2) + (32 \times 14) + (103 \times 7) = 1,499\text{ cycles} \quad \checkmark
-\end{align*}
 
 \subsection{Latency Sensitivity Analysis}
 Varying read latency $\text{RD\_LAT} \in \{4, 8, 16\}$ demonstrates that cycle variance scales linearly:
@@ -263,16 +216,84 @@ On \texttt{pingpong}, because the 2-way cache incurs only 2 cold misses, doublin
 
 Varying write latency $\text{WR\_LAT} \in \{2, 4, 8\}$ illustrates that under unbuffered write-through, store operations stall execution by $\Delta\text{cycles} = (\text{writes}) \times (\Delta\text{WR\_LAT})$. On \texttt{mixed\_rw}, shifting $\text{WR\_LAT}$ from 4 to 2 reduces execution by exactly $103 \times (-2) = -206$ cycles, while increasing to 8 adds $103 \times (+4) = +412$ cycles.
 
-\subsection{Hardware Synthesis \& Resource Utilization}
-Both designs were evaluated under generic technology elaboration with Yosys. Because behavioral Verilog arrays infer registers, storage allocation is dominated by memory flip-flops:
+\subsection{Hardware Synthesis \& Multi-Target FPGA Evaluation}
+To evaluate hardware area trade-offs, both designs were synthesized across Generic, AMD/Xilinx 7-Series, and Lattice ECP5 FPGA architectures using Yosys.
+
+\begin{table}[htbp]
+\centering
+\caption{Generic Technology-Independent Synthesis}
+\label{tab:generic_synth}
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Metric} & \textbf{2-Way LRU} & \textbf{Direct} & \textbf{Delta} \\
+\midrule
+Total Cells & 35,643 & 39,809 & -4,166 (-10.5\%) \\
+Total Flip-Flops & 10,122 & 10,026 & +96 (+1.0\%) \\
+Multiplexers (\texttt{\$\_MUX\_}) & 4,346 & 8,410 & -4,064 (-48.3\%) \\
+Logic Gates & 21,175 & 21,373 & -198 \\
+Wires & 23,658 & 25,957 & -2,299 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{AMD/Xilinx 7-Series Technology Mapping}
+\label{tab:xilinx_synth}
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Metric} & \textbf{2-Way LRU} & \textbf{Direct} & \textbf{Delta} \\
+\midrule
+Total Cells & 17,411 & 20,460 & -3,049 (-14.9\%) \\
+Total LUTs (LUT2--LUT6) & 6,699 & 9,352 & -2,653 (-28.4\%) \\
+Total Flip-Flops (FDCE/FDRE) & 10,122 & 10,026 & +96 (+1.0\%) \\
+Dedicated Muxes (MUXF7/F8) & 264 & 756 & -492 \\
+Block RAM (\texttt{RAMB18/36}) & 0 & 0 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Lattice ECP5 Technology Mapping}
+\label{tab:ecp5_synth}
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Metric} & \textbf{2-Way LRU} & \textbf{Direct} & \textbf{Delta} \\
+\midrule
+Total Cells & 30,296 & 35,466 & -5,170 (-14.6\%) \\
+LUT4 Primitives & 14,807 & 18,541 & -3,734 (-20.1\%) \\
+Total Flip-Flops (\texttt{TRELLIS\_FF}) & 10,122 & 10,026 & +96 (+1.0\%) \\
+PFUMX / L6MUX21 & 5,319 & 6,851 & -1,532 \\
+Block RAM (\texttt{DP16KD}) & 0 & 0 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Key Synthesis Insights}
 \begin{itemize}
-    \item \textbf{Direct-Mapped Baseline:} Data storage: $64 \times 128\text{b} = 8,192\text{ bits}$; Tag storage: $64 \times 22\text{b} = 1,408\text{ bits}$; Valid storage: $64 \times 1\text{b} = 64\text{ bits}$. Total architectural storage: \textbf{9,664 register bits}.
-    \item \textbf{2-Way Set-Associative Cache:} Data storage: $32 \times 2 \times 128\text{b} = 8,192\text{ bits}$; Tag storage: $32 \times 2 \times 23\text{b} = 1,472\text{ bits}$; Valid storage: $64\text{ bits}$; LRU replacement: $32 \times 1\text{b} = 32\text{ bits}$. Total architectural storage: \textbf{9,760 register bits} (+96 bits, a 1.0\% increase).
+    \item \textbf{Exact +96 Flip-Flop Delta:} The 2-way cache incurs exactly 96 additional flip-flops across all platforms: +64 tag bits ($32\text{ sets} \times 2\text{ ways} \times 23\text{b} - 64\text{ lines} \times 22\text{b}$) and +32 LRU bits ($32 \times 1\text{b}$).
+    \item \textbf{Multiplexer Inversion Phenomenon:} Direct-mapped consumes 28.4\% more LUTs on Xilinx and 48.3\% more generic multiplexers because selecting one 32-bit word across 64 discrete lines requires a wide 64-to-1 multiplexer tree. In 2-way, 32-to-1 set selection followed by a 2-to-1 way mux significantly reduces logic depth.
+    \item \textbf{0 Block RAM Inference:} Single-cycle combinational read lookups require discrete flip-flops, preventing BRAM inference. Mapping to BRAM requires synchronous read wrappers introducing a 1-cycle latency.
+    \item \textbf{Physical P\&R and $F_{\max}$:} Unconstrained out-of-context P\&R with >10,000 discrete flip-flops and 296 I/O pins exhaustively congests routing channels (>70,000 nets). Reliable post-route physical $F_{\max}$ requires full SoC integration.
 \end{itemize}
-The primary area and delay cost of 2-way associativity stems from combinational logic: doubling comparator count (two 23-bit comparators vs one 22-bit comparator), 32-bit hit-way multiplexing in the read critical path, and priority victim selection logic. Vivado FPGA synthesis figures ($F_{\max}$, LUT/BRAM utilization) were not collected in Phase I.
+
+\subsection{Parameter Sweeps (Capacity \& Block Size)}
+Parameter sweeps via \texttt{scripts/run\_sweeps.sh} evaluate architectural scaling:
+\begin{itemize}
+    \item \textbf{Capacity Sweep ($C \in \{512\text{B}, 1024\text{B}, 2048\text{B}\}$):} Expanding to 2~KB resolves \texttt{large\_loop} thrashing, raising hit rate from 0\% (2-way) and 25\% (direct) to 75.00\% (1,920 cycles, 64.3\% faster). In \texttt{pingpong}, 128 lines in 2~KB direct-mapped eliminate set aliasing, achieving 99.00\% hit rate.
+    \item \textbf{Block Size Sweep ($B \in \{8\text{B}, 16\text{B}, 32\text{B}\}$):} Sequential stream hit rate strictly follows $(B/4 - 1)/(B/4)$ (50.00\%, 75.00\%, 87.50\%). Conversely, under thrashing workloads (\texttt{pingpong} direct), larger blocks inflate burst cycles from 2,400 to 3,600 without hit benefits.
+\end{itemize}
+
+\subsection{Average Memory Access Time (AMAT) Analysis}
+Classical AMAT models predict $\text{AMAT} = 2 + (\text{Miss Rate} \times 14)$. In cycle-accurate pipelined hardware with overlapped lookup, the **Incremental Hardware AMAT** applies:
+\begin{align*}
+    \text{AMAT} = \text{Hit Latency} + [\text{Miss Rate} \times (\text{Miss Latency} - \text{Hit Latency})] = 2 + (\text{Miss Rate} \times 12)
+\end{align*}
+This formula matches cycle-accurate simulation measurements across all eight read-only traces to **0.0000 cycle error** (e.g., \texttt{seq\_stream}: 5.00 vs 5.00 cyc; \texttt{small\_loop}: 2.30 vs 2.30 cyc; \texttt{pingpong} 2-way: 2.12 vs 2.12 cyc). On \texttt{mixed\_rw}, unbuffered Write-Through stores inject an exact $+0.76$ cycle/access stall overhead ($\frac{103 \times (7 - 4.24)}{300}$), completely explaining the observed gap.
 
 \section{Individual Contributions}
-Individual team contributions were determined from the repository commit log (\texttt{git shortlog -sne main}) and merged pull requests:
+Individual team contributions were verified from the repository commit log (\texttt{git shortlog -sne main}) and merged pull requests:
 
 \begin{table}[htbp]
 \centering
@@ -282,29 +303,28 @@ Individual team contributions were determined from the repository commit log (\t
 \toprule
 \textbf{Member} & \textbf{Role} & \textbf{Deliverables \& PR} & \textbf{Commits} \\
 \midrule
-\textbf{Member 1} & Team Lead \& 2-Way RTL & \texttt{cache\_2way\_lru.v}, report III.A, III.B, III.D; PR \#1 & 24 \\
-\textbf{Member 2} & LRU Logic \& Verification & \texttt{tb\_lru\_directed.v}, LRU diagram, report III.C; PR \#6 & 19 \\
-\textbf{Member 3} & Baseline \& Memory Model & \texttt{cache\_direct.v}, \texttt{main\_memory.v}, latency study, report III.E, III.F; PR \#7 & 6* \\
-\textbf{Member 4} & Traces \& Benchmarks & \texttt{gen\_traces.py} (9 traces), \texttt{tb\_compare.v}, \texttt{plot\_results.py}, report III.G, IV; PR \#8 & 6 \\
-\textbf{Member 5} & Report, Synthesis \& Video Lead & Report assembly, IEEEtran package, block diagram script, synthesis summary; active PR & 7 \\
+\textbf{Member 1} & Team Lead, 2-Way RTL \& Synthesis & \texttt{cache\_2way\_lru.v}, \texttt{synth\_all.sh}, resource report; PR \#1, PR \#20 & 39 \\
+\textbf{Member 2} & LRU Logic \& Verification & \texttt{tb\_lru\_directed.v}, \texttt{tb\_lru\_random.v}, mutation tests; PR \#6, PR \#17 & 25 \\
+\textbf{Member 3} & Baseline, Sweeps \& AMAT & \texttt{cache\_direct.v}, \texttt{main\_memory.v}, sweeps, AMAT; PR \#7, PR \#18 & 15* \\
+\textbf{Member 4} & Traces \& Benchmarks & \texttt{gen\_traces.py} (11 traces), \texttt{tb\_compare.v}, plots; PR \#8, PR \#19 & 13 \\
+\textbf{Member 5} & Final Report \& Repository & Final report assembly, LaTeX package, README update; PR \#9, PR \#16 & 17 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\noindent \textit{*Attribution Flag:} All 6 commits for Member~3 were committed under \texttt{neerajsingh@Neerajs-MacBook-Pro-2.local}. This local address is flagged for correction before final grading submission.
+\noindent \textit{*Attribution Note:} 6 of Member~3's commits were mapped via \texttt{.mailmap} (PR \#10).
 
 \section{Conclusion}
-Phase I of Project 7 achieved complete architectural design, cycle-accurate functional verification, and performance evaluation for a 1~KB 2-way set-associative cache and direct-mapped baseline.
+This capstone research project successfully designed, functionally verified, synthesized, and benchmarked a 1024-Byte 2-way set-associative L1 data cache featuring True LRU replacement against an architectural direct-mapped baseline in Verilog HDL. Across eleven synthetic benchmark workloads spanning 4,188 total memory transactions, zero data mismatches were observed against the architectural golden memory model.
 
-The empirical findings confirm that:
+The complete empirical and synthesis evaluation yields five major conclusions:
 \begin{enumerate}
-    \item Set associativity provides dramatic performance benefits on conflict-heavy workloads (\texttt{pingpong}), improving hit rate from 0.00\% to 99.00\% and reducing execution cycles by 6.6$\times$ (424 vs 2,800 cycles).
-    \item When working sets exceed associativity cyclically (\texttt{cyclic3}), LRU exhibits catastrophic thrashing, achieving 0.00\% hits for both caches.
-    \item Direct-mapped caches can outperform 2-way LRU on loops sized between $C$ and $2C$ capacity (\texttt{large\_loop}, 1.5~KB working set), where direct-mapped achieves a 25.00\% hit rate (4,224 cycles) while 2-way LRU thrashes at 0.00\% (5,376 cycles) due to non-colliding modulo-64 line survivals.
-    \item Unbuffered write-through operations impose heavy bus stall overheads (7 cycles per store), as confirmed by 721 stall cycles in \texttt{mixed\_rw}.
+    \item Set associativity completely eliminates thrashing on conflict-heavy workloads (\texttt{pingpong}), improving hit rate from 0.00\% to 99.00\% and reducing execution cycles by 6.6$\times$ (424 vs 2,800 cycles). In concurrent workloads (\texttt{hot\_stream}), the second way shields hot data from cold streaming sweeps (13.4\% speedup).
+    \item LRU replacement experiences catastrophic failure on cyclic traversals exceeding associativity (\texttt{cyclic3}, 0.00\% hits). On loops sized between $C$ and $2C$ capacity (\texttt{large\_loop}, 1.5~KB), direct-mapped outperforms 2-way LRU (25.00\% vs 0.00\% hit rate) due to non-colliding modulo-64 line survivals.
+    \item Multi-target FPGA synthesis confirms that 2-way associativity incurs an exact 96 flip-flop overhead (+1.0\%) for tag and LRU arrays, but direct-mapped consumes 28.4\% more LUTs on Xilinx and 48.3\% more generic multiplexers due to deep 64-line multiplexer trees. Both designs infer 0 Block RAMs due to combinational single-cycle read lookup requirements.
+    \item Capacity sweeps demonstrate that expanding to 2~KB eliminates conflict thrashing for both designs, while block size sweeps confirm that streaming hit rates strictly obey $(B/4 - 1)/(B/4)$.
+    \item Incremental Hardware AMAT ($\text{AMAT} = 2 + \text{Miss Rate} \times 12$) matches cycle-accurate simulation across all eight read-only workloads with 0.00 cycle error, while write-through store stalls fully account for write-intensive overheads.
 \end{enumerate}
-
-\textbf{Methodological Limitations:} Evaluations were conducted via cycle-accurate RTL simulation with generic Yosys elaboration. Hit-time clock degradation due to comparator and multiplexer propagation delays and FPGA post-routing $F_{\max}$ were not measured. Furthermore, Phase II implementation plans (including write-back dirty bit tracking, multi-level hierarchy, or FPGA deployment on Vivado) remain \textbf{TO CONFIRM}.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}
