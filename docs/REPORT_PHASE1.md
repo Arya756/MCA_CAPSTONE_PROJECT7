@@ -425,33 +425,98 @@ To analyze the performance impact of backing memory write stalls under the unbuf
    - For $WR\_LAT = 8$: $103 \times (+4) = +412\text{ cycles}$
 2. **Workload Selectivity:** Traces comprising exclusively read instructions (`seq_stream`, `small_loop`, `pingpong`, `cyclic3`, `strided`, `random`) demonstrate zero cycle variance across $WR\_LAT$ changes, validating that read refill bursts depend solely on $RD\_LAT$. The write-heavy trace `mixed_rw` (103 writes) highlights the substantial CPU stall penalty of unbuffered write-through operations, motivating a write buffer or write-back policy for Phase II.
 
-### C. Hardware Synthesis & Resource Utilization Evaluation
-*Contributed by Member 5 (Report, Diagrams, Synthesis, Video)*  
-*Configuration: Target Verilog modules `rtl/cache_2way_lru.v` and `rtl/cache_direct.v` (Source: `results/yosys_summary.md`)*
+### C. Hardware Synthesis & FPGA Resource Utilization Evaluation
+*Contributed by Member 1 (2-Way RTL, FPGA Synthesis & Resource Report, Issue #12)*  
+*Configuration: Target Verilog modules `rtl/cache_2way_lru.v` (`cache_2way_lru`) and `rtl/cache_direct.v` (`cache_direct`)*  
+*Tools Used: Yosys Open SYnthesis Suite (v0.71+post), Target Devices: Generic, AMD/Xilinx 7-Series, Lattice ECP5 (Reproduction Script: `./scripts/synth_all.sh`)*
 
-To evaluate the hardware area overhead associated with 2-way set associativity and True LRU replacement, both cache microarchitectures were analyzed under generic RTL elaboration using Yosys.
+In Phase II, both cache modules were synthesized under identical conditions across three distinct flows to evaluate gate-level and FPGA device resource utilization:
+1. **Generic Technology-Independent Elaboration:** Evaluates gate-level complexity (multiplexers, logic gates, and registers) independent of target silicon.
+2. **AMD/Xilinx 7-Series FPGA Technology Mapping (`synth_xilinx`):** Maps logic to Xilinx 7-Series primitive cells (LUT2–LUT6, FDCE/FDRE, MUXF7/F8, CARRY4, Block RAM).
+3. **Lattice ECP5 FPGA Technology Mapping (`synth_ecp5`):** Maps logic to ECP5 architecture slices (LUT4, TRELLIS_FF, PFUMX, L6MUX21, CCU2C, DP16KD BRAM).
 
-#### 1. Architectural Register Allocation
-Because both cache architectures are modeled behaviorally in synthesizable Verilog using register arrays (`reg [...] data [...]`, `reg [...] tag [...]`, `reg valid [...]`), generic synthesis infers flip-flops for all storage elements:
+> **Important Rule on Device Comparisons:** Numbers from different target device families are separated into dedicated tables below and are never mixed in a single row.
 
-| Storage Structure | Direct-Mapped Baseline (`cache_direct`) | 2-Way Set-Associative (`cache_2way_lru`) | Delta (2-Way vs Direct) | Architectural Explanation |
-|---|---|---|---|---|
-| **Data Storage Array** | 64 lines × 128 bits = **8,192 bits** | 32 sets × 2 ways × 128 bits = **8,192 bits** | 0 bits (0.0%) | Identical 1024-Byte user data capacity |
-| **Tag Storage Array** | 64 lines × 22 bits = **1,408 bits** | 32 sets × 2 ways × 23 bits = **1,472 bits** | +64 bits (+4.5%) | 23-bit tag vs 22-bit tag (halved set count) |
-| **Valid Bits** | 64 lines × 1 bit = **64 bits** | 32 sets × 2 ways × 1 bit = **64 bits** | 0 bits (0.0%) | 1 valid bit per stored 16-byte block |
-| **LRU Replacement Bit** | **0 bits** (Direct-mapped: no replacement choice) | 32 sets × 1 bit = **32 bits** | +32 bits (New) | 1 True LRU tracking bit per set |
-| **Total Architectural Storage** | **9,664 register bits** | **9,760 register bits** | **+96 register bits (+1.0%)** | Minimal storage delta (1.0% increase) |
+#### Table 1: Generic Technology-Independent Synthesis
+*Command: `yosys -p "read_verilog -sv <source>; synth -top <module>; stat"`*  
+*Raw Logs: `results/synth_2way_generic.log`, `results/synth_direct_generic.log`*
 
-#### 2. Combinational Logic and Multiplexing Overhead
-While total storage register requirements increase by only 96 flip-flops (1.0%), the true silicon cost of 2-way set associativity lies in the combinational control and datapath logic:
-1. **Parallel Comparators:** The 2-way cache requires two parallel 23-bit equality comparators (`hit0` and `hit1`) operating concurrently, doubling comparator hardware relative to the single 22-bit comparator of the direct-mapped baseline.
-2. **Hit-Way Data Multiplexing:** Direct-mapped lookup delivers the indexed line data directly. The 2-way cache requires an additional 32-bit 2-to-1 multiplexer steered by `hit_way` to select the hit block, inserting combinational delay into the critical read hit response path.
-3. **Victim Selection & LRU Update Logic:** The 2-way cache incorporates priority multiplexers (`!valid0 ? Way0 : (!valid1 ? Way1 : lru)`) and synchronous toggle logic (`lru <= ~hit_way` on hit, `lru <= ~victim_way` on refill).
+| Metric | 2-Way LRU (`cache_2way_lru`) | Direct-Mapped (`cache_direct`) | Delta (2-Way − Direct) | Architectural Explanation |
+| :--- | :---: | :---: | :---: | :--- |
+| **Total Cells** | **35,643** | **39,809** | **-4,166 (-10.5%)** | Direct-mapped requires deeper multiplexer trees for 64 lines vs 32 sets |
+| **Total Flip-Flops** | **10,122** | **10,026** | **+96 (+1.0%)** | **Exact architectural storage delta: +64 tag bits + 32 LRU bits** |
+| - `$_DFFE_PP0P_` | 10,025 | 9,929 | +96 | Storage arrays (valid, tag, data, LRU) with clock-enable & async reset |
+| - `$_DFFE_PP_` | 96 | 96 | 0 | Three 32-bit performance counters (`hit_count`, `miss_count`, `cycle_count`) |
+| - `$_DFF_PP0_` | 1 | 1 | 0 | CPU ready strobe registered pulse |
+| **Multiplexers (`$_MUX_`)**| **4,346** | **8,410** | **-4,064 (-48.3%)** | Direct-mapped 64-to-1 word mux tree requires nearly 2× multiplexer primitives |
+| **Logic Cells (Gates)** | **21,175** | **21,373** | **-198** | Combinational gating, decoders, and comparators |
+| - `$_AND_` | 14,491 | 13,746 | +745 | Two parallel tag comparators and hit-routing gates in 2-way |
+| - `$_NOR_` | 4,992 | 5,209 | -217 | Control logic and address decoding |
+| - `$_ANDNOT_` | 969 | 1,646 | -677 | Bit-masking and line decoding |
+| - `$_OR_` | 341 | 405 | -64 | Hit detection OR gate (`hit0 \|\| hit1`) and status flags |
+| - `$_NAND_` | 156 | 83 | +73 | Tag equality comparison gating |
+| - `$_XOR_` / `$_XNOR_` | 126 | 99 | +27 | Tag comparator bitwise XOR gates |
+| - `$_NOT_` / `$_ORNOT_` | 100 | 185 | -85 | Inversion and polarity logic |
+| **Total Wires** | 23,658 | 25,957 | -2,299 | Interconnect nets |
+| **Total Wire Bits** | 35,876 | 40,041 | -4,165 | Expanded bit-level nets |
 
-#### 3. Synthesis Limits and FPGA Status
-- **Storage Domination:** In generic technology elaboration, flip-flop and cell counts are dominated by the ~8,192 data array registers. In physical ASIC or FPGA implementations, data arrays would map to dedicated SRAM macros or dual-port Block RAM (BRAM) primitives.
-- **Timing and Clock Frequency Limitations:** Yosys generic elaboration provides cell categorization but does not perform technology-specific placement, routing, or static timing analysis. Consequently, physical clock frequency ($F_{\max}$), setup/hold margins, and critical path delays are not measured in Phase I.
-- **Vivado FPGA Synthesis:** Physical FPGA synthesis numbers (LUT, FF, BRAM utilization, and post-implementation $F_{\max}$ via AMD Xilinx Vivado) were not collected during Phase I.
+---
+
+#### Table 2: AMD/Xilinx 7-Series FPGA Technology Mapping
+*Command: `yosys -p "read_verilog -sv <source>; synth_xilinx -top <module>; stat"`*  
+*Raw Logs: `results/synth_2way_xilinx.log`, `results/synth_direct_xilinx.log`*
+
+| Metric | 2-Way LRU (`cache_2way_lru`) | Direct-Mapped (`cache_direct`) | Delta (2-Way − Direct) | Architectural Explanation |
+| :--- | :---: | :---: | :---: | :--- |
+| **Total Cells** | **17,411** | **20,460** | **-3,049 (-14.9%)** | Direct-mapped synthesizes larger multiplexer trees |
+| **Total LUTs (LUT2–LUT6)** | **6,699** | **9,352** | **-2,653 (-28.4%)** | Direct-mapped consumes 2,832 extra LUT5s for 64-line word selection |
+| - `LUT2` | 190 | 164 | +26 | Small combinational gates |
+| - `LUT3` | 259 | 190 | +69 | FSM decoding and control |
+| - `LUT4` | 938 | 518 | +420 | Parallel tag comparators and victim selection logic |
+| - `LUT5` | 2,487 | 5,319 | -2,832 | 64-line multiplexer trees in direct-mapped expand into LUT5 banks |
+| - `LUT6` | 2,825 | 3,161 | -336 | Wider data selection and line decoders |
+| **Total Flip-Flops** | **10,122** | **10,026** | **+96 (+1.0%)** | **Exactly +96 flip-flops (+64 tag bits + 32 LRU bits)** |
+| - `FDCE` | 10,026 | 9,930 | +96 | Storage arrays mapped to discrete FFs due to combinational reads |
+| - `FDRE` | 96 | 96 | 0 | Three 32-bit performance counters in both modules |
+| **Dedicated Mux Primitives** | | | | Dedicated slice multiplexers used for line data selection |
+| - `MUXF7` | 190 | 504 | -314 | Hardware 7-input mux primitives |
+| - `MUXF8` | 74 | 252 | -178 | Hardware 8-input mux primitives |
+| **Carry Chains (`CARRY4`)** | 25 | 25 | 0 | 32-bit counter incrementers in both modules |
+| **Block RAM (`RAMB18`/`36`)** | **0** | **0** | **0** | **0 BRAM inferred: combinational reads require register storage** |
+| **Distributed RAM (`LUTRAM`)**| **0** | **0** | **0** | Memory arrays synthesized to discrete flip-flops |
+
+---
+
+#### Table 3: Lattice ECP5 FPGA Technology Mapping
+*Command: `yosys -p "read_verilog -sv <source>; synth_ecp5 -top <module>; stat"`*  
+*Raw Logs: `results/synth_2way_ecp5.log`, `results/synth_direct_ecp5.log`*
+
+| Metric | 2-Way LRU (`cache_2way_lru`) | Direct-Mapped (`cache_direct`) | Delta (2-Way − Direct) | Architectural Explanation |
+| :--- | :---: | :---: | :---: | :--- |
+| **Total Cells** | **30,296** | **35,466** | **-5,170 (-14.6%)** | Direct-mapped consumes more LUT4s and slice multiplexers |
+| **LUT4** | **14,807** | **18,541** | **-3,734 (-20.1%)** | Direct-mapped 64-line multiplexer consumes extra 4-input LUTs |
+| **Total Flip-Flops (`TRELLIS_FF`)**| **10,122** | **10,026** | **+96 (+1.0%)** | Storage arrays mapped to discrete TRELLIS_FF registers |
+| **PFUMX (Slice Muxes)** | 4,502 | 6,165 | -1,663 | ECP5 slice multiplexer primitives |
+| **L6MUX21 (Wide Muxes)** | 817 | 686 | +131 | Wide multiplexing for 2-way hit selection |
+| **CCU2C (Carry Units)** | 48 | 48 | 0 | 32-bit counter arithmetic in both modules |
+| **Block RAM (`DP16KD`)** | **0** | **0** | **0** | **0 BRAM inferred due to combinational read architecture** |
+
+---
+
+#### Table 4: Maximum Clock Frequency ($F_{\max}$) and Physical P&R Analysis
+*Physical Placement & Routing (P&R) Evaluation*
+
+| Metric | 2-Way LRU (`cache_2way_lru`) | Direct-Mapped (`cache_direct`) | Status / Justification |
+| :--- | :---: | :---: | :--- |
+| **Maximum Frequency ($F_{\max}$)** | **NOT MEASURED** | **NOT MEASURED** | **No Place-and-Route (P&R).** Because storage arrays synthesize to >10,000 discrete flip-flops, out-of-context P&R on 296 unconstrained I/O pins exhaustively congests routing channels (>70,000 nets). Reliable post-route physical $F_{\max}$ requires full vendor SoC integration in Vivado/Quartus or a synchronous BRAM architecture. |
+
+#### Synthesis Discussion & Architectural Insights
+1. **The 96 Flip-Flop Storage Delta:** Across all three synthesis flows, the 2-way cache requires exactly **96 more flip-flops** than the direct-mapped cache (10,122 vs 10,026 FFs, a 1.0% increase). This confirms exact architectural alignment:
+   - Tag storage: 32 sets × 2 ways × 23 bits = 1,472 bits vs 64 lines × 22 bits = 1,408 bits (**+64 tag bits**).
+   - LRU replacement storage: 32 sets × 1 bit = **+32 LRU bits** (direct-mapped requires 0 LRU bits).
+   - Total delta: $64 + 32 = +96\text{ flip-flops}$.
+2. **Multiplexer Inversion Phenomenon:** Counterintuitively, the direct-mapped cache consumes **28.4% more LUTs on Xilinx** (9,352 vs 6,699 LUTs) and **48.3% more multiplexers on Generic** (8,410 vs 4,346 muxes). In direct-mapped mode, selecting one 32-bit word across 64 discrete lines requires a massive 64-to-1 32-bit multiplexer tree. In 2-way mode, the set index selects across only 32 sets, followed by a localized 2-to-1 way mux. This set partitioning significantly reduces multiplexer depth.
+3. **Block RAM Inference Barrier:** Both designs inferred **0 Block RAMs** across Xilinx (`RAMB18/36`) and Lattice (`DP16KD`). Hardware BRAM primitives strictly require synchronous read addresses registered at the clock edge (`always @(posedge clk)`). Because both caches implement single-cycle combinational read lookups (`assign tag_match = (tag[index] == req_tag)`), synthesis tools are forced to expand all 1,024 bytes of data and tags into discrete flip-flops. Mapping to BRAM would require a pipelined synchronous SRAM wrapper introducing a 1-cycle read latency.
 
 ---
 
