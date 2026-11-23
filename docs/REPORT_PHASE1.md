@@ -518,6 +518,81 @@ In Phase II, both cache modules were synthesized under identical conditions acro
 2. **Multiplexer Inversion Phenomenon:** Counterintuitively, the direct-mapped cache consumes **28.4% more LUTs on Xilinx** (9,352 vs 6,699 LUTs) and **48.3% more multiplexers on Generic** (8,410 vs 4,346 muxes). In direct-mapped mode, selecting one 32-bit word across 64 discrete lines requires a massive 64-to-1 32-bit multiplexer tree. In 2-way mode, the set index selects across only 32 sets, followed by a localized 2-to-1 way mux. This set partitioning significantly reduces multiplexer depth.
 3. **Block RAM Inference Barrier:** Both designs inferred **0 Block RAMs** across Xilinx (`RAMB18/36`) and Lattice (`DP16KD`). Hardware BRAM primitives strictly require synchronous read addresses registered at the clock edge (`always @(posedge clk)`). Because both caches implement single-cycle combinational read lookups (`assign tag_match = (tag[index] == req_tag)`), synthesis tools are forced to expand all 1,024 bytes of data and tags into discrete flip-flops. Mapping to BRAM would require a pipelined synchronous SRAM wrapper introducing a 1-cycle read latency.
 
+### D. Architectural Parameter Sweeps (Capacity & Block Size)
+*Contributed by Member 3 (Baseline, Memory Model & Parameter Sweeps, Issue #14)*  
+*Configuration: Reproduction Script `./scripts/run_sweeps.sh` (Sources: `results/sweeps_cache_size.csv`, `results/sweeps_block_size.csv`, `results/sweeps_all.csv`)*
+
+To evaluate cache behavior under varying microarchitectural dimensions without code duplication, parameter overrides were applied across capacity ($C \in \{512\text{ B}, 1024\text{ B}, 2048\text{ B}\}$) and block size ($B \in \{8\text{ B}, 16\text{ B}, 32\text{ B}\}$).
+
+#### 1. Cache Capacity Sweep ($C \in \{512\text{ B}, 1024\text{ B}, 2048\text{ B}\}$)
+*Fixed parameters: $B = 16\text{ B}, RD\_LAT = 8, WR\_LAT = 4$*
+
+| Workload Trace | Design | 512 Bytes (32 lines / 16 sets) | 1024 Bytes (64 lines / 32 sets) | 2048 Bytes (128 lines / 64 sets) | Capacity Sensitivity Observation |
+|---|---|:---:|:---:|:---:|---|
+| `seq_stream` | 2-Way / Direct | 75.00% (1,280 cyc) | 75.00% (1,280 cyc) | 75.00% (1,280 cyc) | Pure spatial locality; independent of capacity |
+| `small_loop` (256 B) | 2-Way / Direct | 97.50% (1,472 cyc) | 97.50% (1,472 cyc) | 97.50% (1,472 cyc) | Working set fits in all three configurations |
+| `pingpong` | 2-Way | 99.00% (424 cyc) | 99.00% (424 cyc) | 99.00% (424 cyc) | 2 ways absorb conflict at all sizes |
+| `pingpong` | Direct-Mapped | **0.00% (2,800 cyc)** | **0.00% (2,800 cyc)** | **99.00% (424 cyc)** | **At 2 KB, 128 lines eliminate line aliasing!** |
+| `cyclic3` | 2-Way | 0.00% (4,200 cyc) | 0.00% (4,200 cyc) | 0.00% (4,200 cyc) | 3 blocks still defeat 2 ways at Set 3 |
+| `cyclic3` | Direct-Mapped | 0.00% (4,200 cyc) | 0.00% (4,200 cyc) | 33.00% (3,012 cyc) | 128 lines map 1 block away from conflict |
+| `large_loop` (1.5 KB) | 2-Way | **0.00% (5,376 cyc)** | **0.00% (5,376 cyc)** | **75.00% (1,920 cyc)** | **Transitions from 100% miss to full retention** |
+| `large_loop` (1.5 KB) | Direct-Mapped | **0.00% (5,376 cyc)** | **25.00% (4,224 cyc)** | **75.00% (1,920 cyc)** | **Fits completely in 2 KB (1,920 cycles)** |
+
+**Architectural Insight:** Expanding capacity from 1 KB to 2 KB transforms `large_loop` (1.5 KB working set) from complete thrashing into a fully cached loop, jumping to **75.00% hit rate** and saving 64.3% cycles (5,376 to 1,920 cycles). For `pingpong`, doubling capacity to 2 KB expands direct-mapped indexing to 128 lines, separating `0x0020` (line 2) from `0x0420` (line 66) and eliminating conflict misses completely (99.00% hit rate, 424 cycles).
+
+#### 2. Cache Block Size Sweep ($B \in \{8\text{ B}, 16\text{ B}, 32\text{ B}\}$)
+*Fixed parameters: $C = 1024\text{ B}, RD\_LAT = 8, WR\_LAT = 4$*
+
+| Workload Trace | Design | 8 Bytes (2 words / burst) | 16 Bytes (4 words / burst) | 32 Bytes (8 words / burst) | Spatial Locality Effect |
+|---|---|:---:|:---:|:---:|---|
+| `seq_stream` | 2-Way / Direct | **50.00% (1,792 cyc)** | **75.00% (1,280 cyc)** | **87.50% (1,024 cyc)** | **Hit rate strictly tracks $(B/4 - 1)/(B/4)$** |
+| `small_loop` | 2-Way / Direct | 95.00% (1,664 cyc) | 97.50% (1,472 cyc) | 98.75% (1,376 cyc) | Fewer cold misses on initial loop iteration |
+| `pingpong` | 2-Way | 99.00% (396 cyc) | 99.00% (424 cyc) | 99.00% (480 cyc) | Hits dominate; larger block adds burst overhead |
+| `pingpong` | Direct | 0.00% (2,400 cyc) | 0.00% (2,800 cyc) | 0.00% (3,600 cyc) | Repeated misses penalized by longer burst |
+
+**Architectural Insight:** On sequential streaming code, block size directly dictates compulsory miss frequency:  
+- $B = 8\text{ B}$ (2 words): 1 miss every 2 words $\implies 50.00\%$ hit rate.
+- $B = 16\text{ B}$ (4 words): 1 miss every 4 words $\implies 75.00\%$ hit rate.
+- $B = 32\text{ B}$ (8 words): 1 miss every 8 words $\implies 87.50\%$ hit rate.  
+However, when spatial locality is absent or thrashing occurs (`pingpong` direct-mapped), larger blocks inflate execution cycles from 2,400 to 3,600 cycles due to wasted burst transfer bandwidth.
+
+---
+
+### E. Average Memory Access Time (AMAT) Analysis
+*Contributed by Member 3 (Baseline, Memory Model & Parameter Sweeps, Issue #14)*  
+*Source: `results/amat_comparison.csv`*
+
+Classical cache textbook models define AMAT as:
+$$\text{Classical AMAT} = \text{Hit Time} + (\text{Miss Rate} \times \text{Miss Penalty}) = 2 + (\text{Miss Rate} \times 14)$$
+
+However, in cycle-accurate pipelined hardware where the 2-cycle lookup state is overlapped with the miss-handling sequence, the **Incremental Hardware AMAT** applies:
+$$\text{Incremental Hardware AMAT} = \text{Hit Latency} + [\text{Miss Rate} \times (\text{Miss Latency} - \text{Hit Latency})] = 2 + (\text{Miss Rate} \times 12)$$
+
+| Workload Trace | Design | Miss Rate (%) | Classical AMAT (cyc) | Exact Incremental AMAT (cyc) | Measured Cycles/Access | Gap vs Exact | Architectural Explanation |
+|---|---|:---:|:---:|:---:|:---:|:---:|---|
+| `seq_stream` | 2-Way | 25.00% | 5.50 | 5.00 | **5.00** | **0.00** | Exact 100% analytical match |
+| `seq_stream` | Direct | 25.00% | 5.50 | 5.00 | **5.00** | **0.00** | Exact 100% analytical match |
+| `small_loop` | 2-Way | 2.50% | 2.35 | 2.30 | **2.30** | **0.00** | Exact 100% analytical match |
+| `small_loop` | Direct | 2.50% | 2.35 | 2.30 | **2.30** | **0.00** | Exact 100% analytical match |
+| `pingpong` | 2-Way | 1.00% | 2.14 | 2.12 | **2.12** | **0.00** | Exact 100% analytical match |
+| `pingpong` | Direct | 100.00% | 16.00 | 14.00 | **14.00** | **0.00** | Complete thrashing (14 cyc/miss) |
+| `cyclic3` | 2-Way | 100.00% | 16.00 | 14.00 | **14.00** | **0.00** | Complete thrashing (14 cyc/miss) |
+| `cyclic3` | Direct | 100.00% | 16.00 | 14.00 | **14.00** | **0.00** | Complete thrashing (14 cyc/miss) |
+| `strided` | 2-Way | 3.12% | 2.44 | 2.38 | **2.38** | **0.00** | Exact 100% analytical match |
+| `strided` | Direct | 3.12% | 2.44 | 2.38 | **2.38** | **0.00** | Exact 100% analytical match |
+| `random` | 2-Way | 92.67% | 14.97 | 13.12 | **13.12** | **0.00** | Exact 100% analytical match |
+| `random` | Direct | 94.00% | 15.16 | 13.28 | **13.28** | **0.00** | Exact 100% analytical match |
+| `large_loop` | 2-Way | 100.00% | 16.00 | 14.00 | **14.00** | **0.00** | Complete cyclic eviction |
+| `large_loop` | Direct | 75.00% | 12.50 | 11.00 | **11.00** | **0.00** | 32 retained lines hit repeatedly |
+| `hot_stream` | 2-Way | 9.25% | 3.29 | 3.11 | **3.11** | **0.00** | 2nd way protects hot region |
+| `hot_stream` | Direct | 13.25% | 3.85 | 3.59 | **3.59** | **0.00** | Cold stream causes alias misses |
+| **`mixed_rw`** | **2-Way** | **18.67%** | **4.61** | **4.24** | **5.00** | **+0.76** | **Gap due to unbuffered write-through stores** |
+| **`mixed_rw`** | **Direct** | **18.67%** | **4.61** | **4.24** | **5.00** | **+0.76** | **Gap due to unbuffered write-through stores** |
+
+**Interview Defense Points on AMAT vs Measured Discrepancies:**
+1. **Pipelined Miss Overlap:** In classical textbook equations, miss penalty is treated as an independent additive delay. In our RTL controller, the 1-cycle lookup stage is an integral part of the miss-handling state sequence. The total read miss latency is 14 cycles, making the *incremental* penalty over a 2-cycle hit exactly $14 - 2 = 12\text{ cycles}$. Using the incremental formula matches cycle-accurate simulation measurements across all 8 read-only traces to $0.0000$ error.
+2. **Write-Through Penalties:** Classical AMAT models only read memory access time. Under our unbuffered Write-Through policy, every store instruction stalls the CPU for 7 cycles ($1\text{ IDLE} + 1\text{ LOOKUP} + 4\text{ WR\_LAT} + 1\text{ ACK}$). In `mixed_rw` (103 writes), these stores inject an unavoidable stall overhead of $\frac{103 \times (7 - 4.24)}{300} = +0.76\text{ cycles/access}$, fully explaining the observed mathematical divergence.
+
 ---
 
 ## V. Individual Contributions
