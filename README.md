@@ -212,11 +212,13 @@ From `results/results.csv` ($RD\_LAT = 8, WR\_LAT = 4$):
 
 From `results/resource_table.md` (synthesized with Yosys v0.71+):
 
-| Metric | 2-Way LRU Cache | Direct-Mapped Baseline | Delta (2-Way − Direct) | Architectural Explanation |
+| Metric | 2-Way LRU Cache | Direct-Mapped Baseline | Delta (2-Way vs Direct) | Architectural Explanation |
 |---|:---:|:---:|:---:|---|
-| **Generic Cells** | 35,643 | 39,809 | -4,166 (-10.5\%) | Direct-mapped requires deeper mux trees |
-| **Generic Muxes** | 4,346 | 8,410 | -4,064 (-48.3\%) | Direct-mapped 64-to-1 word mux tree |
-| **Xilinx 7-Series LUTs** | 6,699 | 9,352 | -2,653 (-28.4\%) | Direct consumes 2,832 extra LUT5s for muxes |
-| **ECP5 LUT4s** | 14,807 | 18,541 | -3,734 (-20.1\%) | Direct consumes more slice muxes & LUT4s |
-| **Flip-Flops (All Targets)** | 10,122 | 10,026 | **+96 (+1.0\%)** | **Exact storage delta: +64 tag bits + 32 LRU bits** |
-| **Block RAM (BRAM)** | **0** | **0** | **0** | **0 inferred: combinational reads require discrete FFs** |
+| **Generic Cells** | 35,643 | 39,809 | -4,166 (-10.5% for 2-way) | Direct-mapped requires 11.7% more cells for deeper mux trees |
+| **Generic Muxes** | 4,346 | 8,410 | -4,064 (-48.3% for 2-way) | Direct-mapped consumes **93.5% more muxes** (64-to-1 word mux tree) |
+| **Xilinx 7-Series LUTs** | 6,699 | 9,352 | -2,653 (-28.4% for 2-way) | Direct-mapped consumes **39.6% more LUTs** (extra 2,832 LUT5s for muxes) |
+| **ECP5 LUT4s** | 14,807 | 18,541 | -3,734 (-20.1% for 2-way) | Direct-mapped consumes **25.2% more LUT4s** and slice muxes |
+| **Flip-Flops (All Targets)** | 10,122 | 10,026 | **+96 (+1.0%)** | **Exact storage delta: +64 tag bits + 32 LRU bits** |
+| **Block RAM (BRAM)** | **0** | **0** | **0** | **0 inferred: single-cycle combinational reads require discrete FFs** |
+
+> **Critical Synthesis Caveat:** The direct-mapped baseline consumes more LUTs and multiplexers *solely* because both microarchitectures store lines in discrete registers with single-cycle combinational reads, where a 64-to-1 word selection tree is larger and deeper than a 32-to-1 tree followed by a 2-to-1 way mux. In physical ASIC or FPGA implementations mapped to synchronous Block RAM or SRAM macros, set associativity inherently requires more logic (parallel comparators and hit multiplexing) without this multiplexer tree penalty. This result must not be interpreted as associativity being cheaper in general.
