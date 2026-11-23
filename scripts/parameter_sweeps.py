@@ -32,7 +32,8 @@ os.environ["PATH"] = f"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{os.enviro
 
 TRACES = [
     "seq_stream", "small_loop", "pingpong", "cyclic3",
-    "strided", "random", "mixed_rw", "large_loop", "hot_stream"
+    "strided", "random", "mixed_rw", "large_loop", "hot_stream",
+    "matrix_walk", "write_heavy"
 ]
 
 def run_simulation(rd_lat=8, wr_lat=4, cap=1024, blk=16):
@@ -260,9 +261,13 @@ def main():
         delta_16 = r16["total_cycles"] - r8["total_cycles"]
         
         # Read misses trigger block refills
-        # On mixed_rw, accesses include writes, so check write-miss scaling
+        # On traces with writes, writes are no-write-allocate (no block refill)
         if trace == "mixed_rw":
             # 32 read misses, 24 write misses (no-allocate)
+            expected_d4 = 32 * (-4)
+            expected_d16 = 32 * (+8)
+        elif trace == "write_heavy":
+            # 32 read misses, 125 write misses (no-allocate)
             expected_d4 = 32 * (-4)
             expected_d16 = 32 * (+8)
         else:
@@ -275,7 +280,7 @@ def main():
             print(f"  [FAIL] {trace} {design}: delta4={delta_4} vs exp={expected_d4}, delta16={delta_16} vs exp={expected_d16}")
             formula_failures += 1
 
-    # Verify WR_LAT on mixed_rw (103 writes)
+    # Verify WR_LAT on mixed_rw (103 writes) and write_heavy (516 writes)
     mrw_wr2 = wr_results[2][("mixed_rw", "2way")]
     mrw_wr4 = wr_results[4][("mixed_rw", "2way")]
     mrw_wr8 = wr_results[8][("mixed_rw", "2way")]
@@ -285,6 +290,17 @@ def main():
         print(f"  [PASS] mixed_rw WR_LAT check: delta(4->2)={d_wr2} (-206) | delta(4->8)={d_wr8} (+412) [Exact 103 writes]")
     else:
         print(f"  [FAIL] mixed_rw WR_LAT mismatch: d2={d_wr2}, d8={d_wr8}")
+        formula_failures += 1
+
+    wh_wr2 = wr_results[2][("write_heavy", "2way")]
+    wh_wr4 = wr_results[4][("write_heavy", "2way")]
+    wh_wr8 = wr_results[8][("write_heavy", "2way")]
+    d_wh2 = wh_wr2["total_cycles"] - wh_wr4["total_cycles"]
+    d_wh8 = wh_wr8["total_cycles"] - wh_wr4["total_cycles"]
+    if d_wh2 == 516 * (-2) and d_wh8 == 516 * (+4):
+        print(f"  [PASS] write_heavy WR_LAT check: delta(4->2)={d_wh2} (-1032) | delta(4->8)={d_wh8} (+2064) [Exact 516 writes]")
+    else:
+        print(f"  [FAIL] write_heavy WR_LAT mismatch: d2={d_wh2}, d8={d_wh8}")
         formula_failures += 1
 
     if formula_failures == 0:
@@ -324,6 +340,8 @@ def main():
         
         if trace == "mixed_rw":
             expl = "Gap due to unbuffered write-through (103 writes stall 7 cycles each)"
+        elif trace == "write_heavy":
+            expl = "Gap due to unbuffered write-through (516 writes stall 7 cycles each)"
         elif gap_exact == 0.0:
             expl = "Exact 100% parity with hardware incremental AMAT formula"
         else:

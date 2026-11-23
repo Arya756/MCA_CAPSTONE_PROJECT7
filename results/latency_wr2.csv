@@ -17,3 +17,7 @@ large_loop,2way,384,0,384,0.00,5376
 large_loop,direct,384,96,288,25.00,4224
 hot_stream,2way,400,363,37,90.75,1244
 hot_stream,direct,400,347,53,86.75,1436
+matrix_walk,2way,512,448,64,87.50,1792
+matrix_walk,direct,512,448,64,87.50,1792
+write_heavy,2way,640,483,157,75.47,3212
+write_heavy,direct,640,483,157,75.47,3212

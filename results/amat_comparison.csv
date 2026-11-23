@@ -17,3 +17,7 @@ direct,mixed_rw,300,244,56,81.33,18.67,4.6133,4.24,4.9967,0.3833,0.7567,Gap due 
 direct,large_loop,384,96,288,25.0,75.0,12.5,11.0,11.0,-1.5,0.0,Exact 100% parity with hardware incremental AMAT formula
 2way,hot_stream,400,363,37,90.75,9.25,3.295,3.11,3.11,-0.185,0.0,Exact 100% parity with hardware incremental AMAT formula
 direct,hot_stream,400,347,53,86.75,13.25,3.855,3.59,3.59,-0.265,0.0,Exact 100% parity with hardware incremental AMAT formula
+2way,matrix_walk,512,448,64,87.5,12.5,3.75,3.5,3.5,-0.25,0.0,Exact 100% parity with hardware incremental AMAT formula
+direct,matrix_walk,512,448,64,87.5,12.5,3.75,3.5,3.5,-0.25,0.0,Exact 100% parity with hardware incremental AMAT formula
+2way,write_heavy,640,483,157,75.47,24.53,5.4344,4.9437,6.6312,1.1969,1.6875,Gap due to unbuffered write-through (516 writes stall 7 cycles each)
+direct,write_heavy,640,483,157,75.47,24.53,5.4344,4.9437,6.6312,1.1969,1.6875,Gap due to unbuffered write-through (516 writes stall 7 cycles each)
