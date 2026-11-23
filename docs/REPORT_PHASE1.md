@@ -180,13 +180,43 @@ To verify LRU transition dynamics, consider a deterministic reference sequence w
 *(The complete state table diagram is visualized in `docs/img/lru_sequence.png`.)*
 
 #### 5. Directed Verification Methodology
-The testbench `tb/tb_lru_directed.v` implements ten comprehensive verification assertions:
+The testbench `tb/tb_lru_directed.v` implements twelve comprehensive verification assertions:
 1. **Steps 1–2:** Cold misses correctly prioritize invalid ways (Way 0 first, then Way 1).
 2. **Steps 3–6:** Hit on $A$ correctly shifts `lru` to protect $A$, causing subsequent block $C$ to evict $B$.
 3. **Step 7:** Multiple sets operate with strict independence.
 4. **Step 8 (Set Isolation):** Intensive memory traffic in Set 1 does not alter or corrupt the LRU tracking bit of Set 0.
 5. **Step 9 (Write Hit Recency):** Write hits update the LRU status register identically to read hits, protecting modified cached lines.
 6. **Step 10 (Sequence Conformance):** The full 10-step reference sequence above is evaluated cycle-by-cycle against internal registers, achieving zero discrepancies.
+7. **Step 11 (Write Miss Non-Allocation - Phase II):** A write miss passes directly to backing memory under No-Write-Allocate without allocating a cache line or disturbing resident LRU tracking bits.
+8. **Step 12 (Invalid-Way Priority Override - Phase II):** Forces the internal `lru` bit onto a valid way via white-box register manipulation to verify that an unpopulated invalid way is strictly selected before evicting a valid line.
+
+#### 6. Pseudo-Random Co-Simulation with Software Reference Model (Phase II)
+*Testbench: `tb/tb_lru_random.v` (5,000 operations, seed `32'h2026_1124`)*
+
+To guard against subtle state-dependent corner cases not exercised by hand-crafted traces, Phase II introduced an automated 5,000-cycle pseudo-random co-simulation environment:
+- **Workload Composition:** 3,243 random reads and 1,757 random writes distributed across 6 target sets using 5 distinct competing block tags per set to ensure sustained way contention.
+- **Cycle-by-Cycle Reference Model:** An architectural golden C/Verilog reference model of a 2-way write-through no-write-allocate cache executes in parallel. After every single request, the testbench checks:
+  1. Hit/Miss status line.
+  2. Read return data word.
+  3. Way valid bits (`valid0`, `valid1`).
+  4. Stored tag registers (`tag0`, `tag1`).
+  5. The set's internal LRU state bit.
+- **Final Architectural State Audit:** Upon test termination, the simulation compares total hit counters (2,013 hits), miss counters (2,987 misses), and LRU eviction counts (1,926 evictions), followed by a complete 4,096-word memory dump audit. **Zero discrepancies** were observed across all 5,000 operations.
+
+#### 7. Bug-Injection & Test Suite Sensitivity Verification (Phase II)
+*Reproduction Script: `./scripts/run_bug_injection.sh`*
+
+To objectively demonstrate testbench mutation detection capability, four deliberate bugs were injected into temporary copies of `rtl/cache_2way_lru.v`:
+
+| Mutation Identifier | RTL Bug Injected | Directed Suite (`tb_lru_directed`) | Random Suite (`tb_lru_random`) | Detection Status |
+|---|---|:---:|:---:|:---:|
+| **Control** | None (Production RTL) | **PASS** | **PASS** | Baseline Golden Model |
+| **Bug 1: Hit Update Inversion** | `lru <= ~hit_way` inverted to `lru <= hit_way` | **FAIL** (Step 4) | **FAIL** (Cycle 12) | **CAUGHT** |
+| **Bug 2: Refill Update Inversion** | `lru <= ~victim_way` inverted to `lru <= victim_way` | **FAIL** (Step 4) | **FAIL** (Cycle 14) | **CAUGHT** |
+| **Bug 3: Eviction Polarity Inversion** | `victim = ~lru` when both valid | **FAIL** (Step 4) | **FAIL** (Cycle 14) | **CAUGHT** |
+| **Bug 4: Ignore Valid Line Status** | Victim logic ignores `valid` bits, choosing solely by `lru` | **FAIL** (Step 12) | **PASS** (Expected) | **CAUGHT** |
+
+*Why Bug 4 Passes Random Simulation:* In normal reachable cache execution from cold reset (`lru=0`), the first fill into Way 0 transitions `lru` to 1, causing the LRU pointer to naturally point toward empty Way 1. Consequently, standard pseudo-random traffic cannot distinguish valid priority from standard LRU order. Directed Step 12 specifically catches Bug 4 by white-box forcing `lru` onto Way 0 before Way 1 is filled, proving the indispensable necessity of directed corner-case testing.
 
 ### D. Controller Finite State Machine (FSM) and Timing Analysis
 **Author:** Member 1 (Team Lead)
