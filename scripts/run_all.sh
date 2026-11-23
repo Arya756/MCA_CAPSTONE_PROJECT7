@@ -6,13 +6,15 @@
 #
 # Description:
 #   One-command automated test runner (works on fresh clone):
-#   1. Generates all 9 memory traces via scripts/gen_traces.py.
+#   1. Generates all 11 memory traces via scripts/gen_traces.py.
 #   2. Compiles and executes tb_lru_directed (verifies LRU replacement).
 #   3. Compiles and executes tb_direct_basic (verifies direct-mapped baseline).
 #   4. Compiles and executes tb_compare (cross-checks data against golden memory,
-#      evaluates cache metrics across all 9 traces, writes results/results.csv).
+#      evaluates cache metrics across all 11 traces, writes results/results.csv).
 #   5. Generates hit-rate and cycles bar charts via scripts/plot_results.py.
 #   6. Validates zero mismatches and all test passes. Exits non-zero on error.
+#
+# Phase II (Member 4): updated to run all 11 traces (added matrix_walk, write_heavy).
 #
 # Usage:
 #   ./scripts/run_all.sh          # Run from project root
@@ -29,15 +31,23 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "============================================================"
-echo " PROJECT 7: CACHE REGRESSION SUITE"
+echo " PROJECT 7: CACHE REGRESSION SUITE (Phase II)"
 echo " Working Directory: $REPO_ROOT"
 echo " Date: $(date)"
 echo "============================================================"
 
-# Check tool dependencies
-command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 not found!"; exit 1; }
-command -v iverilog >/dev/null 2>&1 || { echo "ERROR: iverilog not found! (Install with: sudo apt install iverilog or brew install icarus-verilog)"; exit 1; }
-command -v vvp >/dev/null 2>&1 || { echo "ERROR: vvp not found!"; exit 1; }
+# Check tool dependencies - fail clearly if missing
+MISSING_TOOLS=0
+command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 not found! Install from https://python.org or: brew install python3"; MISSING_TOOLS=1; }
+command -v iverilog >/dev/null 2>&1 || { echo "ERROR: iverilog not found! Install with: sudo apt install iverilog  OR  brew install icarus-verilog"; MISSING_TOOLS=1; }
+command -v vvp     >/dev/null 2>&1 || { echo "ERROR: vvp not found! (should come with iverilog)"; MISSING_TOOLS=1; }
+if [ "$MISSING_TOOLS" -ne 0 ]; then
+    echo ""
+    echo "FATAL: Required tools missing. See errors above. Exiting."
+    exit 1
+fi
+
+echo "Tools OK: python3=$(python3 --version 2>&1 | cut -d' ' -f2)  iverilog=$(iverilog -V 2>&1 | head -1)"
 
 # Create required directories
 mkdir -p traces results docs/img
@@ -46,7 +56,7 @@ mkdir -p traces results docs/img
 rm -f lru_test.vvp direct_test.vvp compare_test.vvp
 
 # ------------------------------------------------------------------------------
-# STEP 1: Generate Traces (9 traces: 7 original + 2 Member 4 extensions)
+# STEP 1: Generate Traces (11 traces: 9 Phase I + 2 Phase II additions)
 # ------------------------------------------------------------------------------
 echo ""
 echo ">>> [1/5] Generating memory traces..."
@@ -55,8 +65,9 @@ python3 scripts/gen_traces.py || { echo "FAIL: Trace generation failed!"; exit 1
 # Verify trace count
 TRACE_COUNT=$(ls -1 traces/*.txt 2>/dev/null | wc -l | tr -d ' ')
 echo "    Generated $TRACE_COUNT trace files in traces/"
-if [ "$TRACE_COUNT" -lt 9 ]; then
-    echo "WARNING: Expected at least 9 traces, found $TRACE_COUNT"
+if [ "$TRACE_COUNT" -lt 11 ]; then
+    echo "ERROR: Expected at least 11 traces, found $TRACE_COUNT. Check scripts/gen_traces.py."
+    exit 1
 fi
 
 # ------------------------------------------------------------------------------
@@ -72,7 +83,7 @@ echo "$LRU_OUTPUT"
 rm -f lru_test.vvp
 
 if ! echo "$LRU_OUTPUT" | grep -q "LRU test: PASS"; then
-    echo "ERROR: tb_lru_directed did not pass!"
+    echo "ERROR: tb_lru_directed did not pass! See output above."
     exit 1
 fi
 
@@ -89,15 +100,15 @@ echo "$DIRECT_OUTPUT"
 rm -f direct_test.vvp
 
 if ! echo "$DIRECT_OUTPUT" | grep -q "DIRECT test: PASS"; then
-    echo "ERROR: tb_direct_basic did not pass!"
+    echo "ERROR: tb_direct_basic did not pass! See output above."
     exit 1
 fi
 
 # ------------------------------------------------------------------------------
-# STEP 4: Run Side-by-Side Comparison Testbench (9 traces)
+# STEP 4: Run Side-by-Side Comparison Testbench (11 traces)
 # ------------------------------------------------------------------------------
 echo ""
-echo ">>> [4/5] Compiling and running tb_compare across all 9 traces..."
+echo ">>> [4/5] Compiling and running tb_compare across all 11 traces..."
 iverilog -g2012 -o compare_test.vvp rtl/cache_2way_lru.v rtl/cache_direct.v rtl/main_memory.v tb/tb_compare.v || {
     echo "FAIL: Compilation of tb_compare failed!"; exit 1;
 }
@@ -106,12 +117,12 @@ echo "$COMPARE_OUTPUT"
 rm -f compare_test.vvp
 
 if ! echo "$COMPARE_OUTPUT" | grep -q "mismatches: 0"; then
-    echo "ERROR: tb_compare detected data mismatches!"
+    echo "ERROR: tb_compare detected data mismatches! See output above. Do NOT submit."
     exit 1
 fi
 
 if ! echo "$COMPARE_OUTPUT" | grep -q "Compare test: PASS"; then
-    echo "ERROR: tb_compare failed!"
+    echo "ERROR: tb_compare failed! See output above."
     exit 1
 fi
 

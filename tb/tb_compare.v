@@ -5,12 +5,13 @@
 // Description:  Executes access traces through BOTH cache_2way_lru and
 //               cache_direct in separate, independent passes against an
 //               architectural golden memory model.
-//               - Runs all 9 deterministic traces (7 original + 2 extensions).
+//               - Runs all 11 deterministic traces (9 Phase I + 2 Phase II).
 //               - Independent cycle timing measured per access from request
 //                 to cpu_ready, accumulated per design without interference.
 //               - Validates data correctness against golden memory (0 mismatches).
 //               - Compares hits, misses, hit rates, and total cycle counts.
 //               - Appends benchmark rows to results/results.csv.
+// Phase II (Member 4): added matrix_walk and write_heavy traces.
 // ============================================================================
 
 `timescale 1ns / 1ps
@@ -452,16 +453,19 @@ module tb_compare;
         if ($value$plusargs("TRACE=%s", cli_trace)) begin
             run_trace_file(cli_trace, cli_trace);
         end else begin
-            // Run all 9 standard traces (7 original + 2 Member 4 extensions)
-            run_trace_file("traces/seq_stream.txt",  "seq_stream");
-            run_trace_file("traces/small_loop.txt",  "small_loop");
-            run_trace_file("traces/pingpong.txt",    "pingpong");
-            run_trace_file("traces/cyclic3.txt",     "cyclic3");
-            run_trace_file("traces/strided.txt",     "strided");
-            run_trace_file("traces/random.txt",      "random");
-            run_trace_file("traces/mixed_rw.txt",    "mixed_rw");
-            run_trace_file("traces/large_loop.txt",  "large_loop");
-            run_trace_file("traces/hot_stream.txt",  "hot_stream");
+            // Run all 11 traces (9 Phase I + 2 Phase II additions from Member 4)
+            run_trace_file("traces/seq_stream.txt",    "seq_stream");
+            run_trace_file("traces/small_loop.txt",    "small_loop");
+            run_trace_file("traces/pingpong.txt",      "pingpong");
+            run_trace_file("traces/cyclic3.txt",       "cyclic3");
+            run_trace_file("traces/strided.txt",       "strided");
+            run_trace_file("traces/random.txt",        "random");
+            run_trace_file("traces/mixed_rw.txt",      "mixed_rw");
+            run_trace_file("traces/large_loop.txt",    "large_loop");
+            run_trace_file("traces/hot_stream.txt",    "hot_stream");
+            // Phase II new traces
+            run_trace_file("traces/matrix_walk.txt",   "matrix_walk");
+            run_trace_file("traces/write_heavy.txt",   "write_heavy");
         end
 
         $display("\n============================================================");

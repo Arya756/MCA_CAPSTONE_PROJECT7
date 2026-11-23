@@ -4,19 +4,27 @@ Trace Generator for Cache Evaluation
 Project 7 - 2-Way Set-Associative vs Direct-Mapped Cache
 Owner: Member 4 (Traces, Comparison Testbench, Scripts)
 
-Generates 9 deterministic memory access traces into traces/ directory:
-1. seq_stream.txt:  Sequential word accesses with 4B stride (~75% hit rate).
-2. small_loop.txt:  Tight 256B loop that fits inside 1KB cache (~97.5% hit rate).
-3. pingpong.txt:    Alternating 2 addresses in same set (favors 2-way: 99% vs 0%).
-4. cyclic3.txt:     3-way cyclic conflict on same set (hurts LRU: 0% hit rate).
-5. strided.txt:     64B strided access, hitting every 4th set.
-6. random.txt:      Deterministic uniform random word accesses (seed 42).
-7. mixed_rw.txt:    Hot region with 70% reads and 30% writes (tests write-through).
-8. large_loop.txt:  ~1.5KB loop exceeding cache capacity (capacity/conflict misses).
-9. hot_stream.txt:  Read-mostly stream with a hot 128B region + cold 2KB sweep.
+Generates 11 deterministic memory access traces into traces/ directory:
+1. seq_stream.txt:   Sequential word accesses with 4B stride (~75% hit rate).
+2. small_loop.txt:   Tight 256B loop that fits inside 1KB cache (~97.5% hit rate).
+3. pingpong.txt:     Alternating 2 addresses in same set (favors 2-way: 99% vs 0%).
+4. cyclic3.txt:      3-way cyclic conflict on same set (hurts LRU: 0% hit rate).
+5. strided.txt:      64B strided access, hitting every 4th set.
+6. random.txt:       Deterministic uniform random word accesses (seed 42).
+7. mixed_rw.txt:     Hot region with 70% reads and 30% writes (tests write-through).
+8. large_loop.txt:   ~1.5KB loop exceeding cache capacity (capacity/conflict misses).
+9. hot_stream.txt:   Read-mostly stream with a hot 128B region + cold 2KB sweep.
+10. matrix_walk.txt: Row-major then column-major walk of a 16x16 word matrix.
+11. write_heavy.txt: Write-intensive stream exercising write-through on most accesses.
 
 All addresses are word-aligned and strictly kept within the 4096-word (16 KB)
 main_memory capacity range: 0x00000000 to 0x00003FFC.
+
+Phase II additions (Member 4):
+  - matrix_walk: demonstrates spatial locality gap between row-major (good) and
+    column-major (bad) traversal patterns on a 16x16 matrix.
+  - write_heavy: stresses the write-through no-write-allocate policy; writes do
+    not load a block on a miss, so hit rate reflects only reads.
 """
 
 import os
@@ -257,6 +265,85 @@ def gen_hot_stream():
                 "Read-mostly stream with hot 128B region + cold 2KB linear sweep", ops)
 
 
+def gen_matrix_walk():
+    """
+    T10: Matrix Walk - Row-Major vs Column-Major (Phase II addition)
+    Locality Pattern: Models a 16x16 word (1024-byte) matrix traversal.
+      - Phase A: row-major order (stride = 4B, one word per step) - high spatial locality.
+      - Phase B: column-major order (stride = 64B, 16 words per column step) - poor spatial locality.
+    Both phases access the same 256 words (1 KB of data).
+
+    Expected Behavior:
+      - Row-major phase: 64 blocks * (1 miss + 3 hits) = 75% hit rate. Same for both caches.
+      - Column-major phase: stride = 64B = 4 cache blocks apart. Each column step lands in a
+        different block, so nearly every access misses (cold start on each of 16 blocks per row).
+        In direct-mapped, columns 0 and 8 (addresses differ by 512B = exactly 32 sets * 16B)
+        map to the same lines, causing extra conflict misses in direct vs 2-way.
+      - Overall: demonstrates that access ORDER over the same data set matters as much as data size.
+
+    Layout: matrix base = 0x1000 (4096 bytes from start), 16x16 = 256 words.
+    Max address: 0x1000 + 255*4 = 0x13FC  (well within 0x3FFC limit).
+    """
+    ROWS, COLS = 16, 16
+    base = 0x1000  # 4 KB offset - matrix starts here
+
+    ops = []
+
+    # Phase A: row-major traversal (good spatial locality)
+    for r in range(ROWS):
+        for c in range(COLS):
+            addr = base + (r * COLS + c) * 4
+            ops.append(("R", addr))
+
+    # Phase B: column-major traversal (poor spatial locality - same data set)
+    for c in range(COLS):
+        for r in range(ROWS):
+            addr = base + (r * COLS + c) * 4
+            ops.append(("R", addr))
+
+    write_trace("matrix_walk.txt",
+                "16x16 matrix: row-major then column-major traversal (spatial locality comparison)", ops)
+
+
+def gen_write_heavy():
+    """
+    T11: Write-Heavy Stream (Phase II addition)
+    Locality Pattern: 80% writes, 20% reads over a 512-byte working set looped 5 times.
+    Stresses write-through no-write-allocate policy directly.
+
+    Expected Behavior:
+      - Under write-through no-write-allocate: a write MISS does NOT load the block.
+        Only reads can fill the cache. So hit rate is dominated by the small read fraction.
+      - Working set = 128 words = 512 bytes (32 cache blocks). Fits in 1 KB cache.
+      - Reads in iteration 1 are cold misses; reads in iterations 2-5 hit (block still cached
+        because writes don't evict on a no-write-allocate policy).
+      - Each write hits main memory directly (write-through) even when the block is cached.
+        Cycle cost of writes is WR_LAT (4 cycles each), dominating total cycles.
+
+    Purpose: Isolates the cost of the write-through policy. Proves that write-intensive
+    workloads are expensive under write-through regardless of associativity, since every
+    write stalls for WR_LAT cycles. Both caches behave identically here.
+    """
+    base = 0x0800   # 2 KB offset
+    words = 128     # 128 words = 512 bytes (32 blocks)
+    iterations = 5
+
+    rng = random.Random(99)  # deterministic seed
+    ops = []
+    for it in range(iterations):
+        for w in range(words):
+            addr = base + w * 4
+            if rng.random() < 0.80:
+                # Write: data = iteration * 1000 + word index (deterministic value)
+                data = it * 1000 + w
+                ops.append(("W", addr, data))
+            else:
+                ops.append(("R", addr))
+
+    write_trace("write_heavy.txt",
+                "80% writes over 512B working set x5 iterations (stresses write-through policy)", ops)
+
+
 def main():
     os.makedirs(TRACES_DIR, exist_ok=True)
     print("Generating deterministic traces in traces/ ...")
@@ -269,7 +356,10 @@ def main():
     gen_mixed_rw()
     gen_large_loop()
     gen_hot_stream()
-    print("All 9 traces generated successfully.")
+    # Phase II additions
+    gen_matrix_walk()
+    gen_write_heavy()
+    print("All 11 traces generated successfully.")
 
 if __name__ == "__main__":
     main()
