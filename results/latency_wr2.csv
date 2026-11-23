@@ -13,3 +13,7 @@ random,2way,300,22,278,7.33,3936
 random,direct,300,18,282,6.00,3984
 mixed_rw,2way,300,244,56,81.33,1293
 mixed_rw,direct,300,244,56,81.33,1293
+large_loop,2way,384,0,384,0.00,5376
+large_loop,direct,384,96,288,25.00,4224
+hot_stream,2way,400,363,37,90.75,1244
+hot_stream,direct,400,347,53,86.75,1436
