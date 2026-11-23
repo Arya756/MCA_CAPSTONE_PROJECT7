@@ -98,8 +98,8 @@ To evaluate execution cycle sensitivity to main memory write latency under the W
 | `small_loop` | Direct-Mapped | 640 | 0 | 1,472 | 1,472 | 1,472 | 0 | 0 | Read-only workload |
 | `pingpong` | 2-Way LRU | 200 | 0 | 424 | 424 | 424 | 0 | 0 | Read-only workload |
 | `pingpong` | Direct-Mapped | 200 | 0 | 2,800 | 2,800 | 2,800 | 0 | 0 | Read-only workload |
-| `cyclic3` | 2-Way LRU | 300 | 0 | 4,200 | 4,200 | 4,200 | 0 | 0 | Read-only workload |
-| `cyclic3` | Direct-Mapped | 300 | 0 | 4,200 | 4,200 | 4,200 | 0 | 0 | Read-only workload |
+| `cyclic3` | 2-Way LRU | 300 | 0 | 4200 | 4200 | 4200 | 0 | 0 | Read-only workload |
+| `cyclic3` | Direct-Mapped | 300 | 0 | 4200 | 4200 | 4200 | 0 | 0 | Read-only workload |
 | `strided` | 2-Way LRU | 256 | 0 | 608 | 608 | 608 | 0 | 0 | Read-only workload |
 | `strided` | Direct-Mapped | 256 | 0 | 608 | 608 | 608 | 0 | 0 | Read-only workload |
 | `random` | 2-Way LRU | 300 | 0 | 3,936 | 3,936 | 3,936 | 0 | 0 | Read-only workload |
@@ -108,3 +108,29 @@ To evaluate execution cycle sensitivity to main memory write latency under the W
 | **`mixed_rw`** | **Direct-Mapped** | **300** | **103** | **1,293** | **1,499** | **1,911** | **-206** | **+412** | **★ Exact: $103 \times (-2) = -206$, $103 \times (+4) = +412$** |
 
 **Key Architectural Insight:** Under a Write-Through policy without write buffers, every memory write stalls the pipeline for $WR\_LAT$ cycles. In `mixed_rw.txt` (which contains exactly 103 store instructions), the cycle change strictly satisfies $\Delta \text{Cycles} = \text{Writes} \times \Delta WR\_LAT$. Traces without stores exhibit zero cycle variance.
+
+---
+
+## 3. Phase II Baseline Re-Confirmation & Parity Checklist (Task 1)
+
+As mandated by Phase II Responsibility 1, the baseline Direct-Mapped cache (`rtl/cache_direct.v`) has been re-audited against the 2-way associative cache (`rtl/cache_2way_lru.v`) to guarantee fair comparison:
+
+1. **Capacity Parity:**
+   - `cache_direct`: $\text{CACHE\_CAPACITY} = 1024\text{ Bytes}$, $\text{BLOCK\_SIZE} = 16\text{ Bytes} \implies 64\text{ lines} \times 16\text{ B} = 1024\text{ B}$.
+   - `cache_2way_lru`: $\text{CACHE\_CAPACITY} = 1024\text{ Bytes}$, $\text{BLOCK\_SIZE} = 16\text{ Bytes}$, $\text{NUM\_WAYS} = 2 \implies 32\text{ sets} \times 2\text{ ways} \times 16\text{ B} = 1024\text{ B}$.
+   - **Conclusion:** Both provide identical data bit capacity (8,192 data bits).
+
+2. **Block Sizing & Refill Protocol Parity:**
+   - Both modules define $\text{WORDS\_PER\_BLOCK} = 4$ (16 Bytes / 4 Bytes per word).
+   - Both utilize the identical 4-cycle sequential burst refill handshake with `main_memory.v`.
+
+3. **Write Policy Parity:**
+   - Both modules enforce **Write-Through, No-Write-Allocate**.
+   - Store hits write through to memory while concurrently updating the resident block.
+   - Store misses bypass the cache without allocating or fetching any line.
+
+4. **Address Breakdown Symmetry:**
+   - Offset: 4 bits in both (`addr[3:0]`).
+   - Direct: 6 index bits (`addr[9:4]`), 22 tag bits (`addr[31:10]`).
+   - 2-Way: 5 index bits (`addr[8:4]`), 23 tag bits (`addr[31:9]`).
+   - The 1-bit difference in tag width mathematically reflects the factor-of-2 difference in set count ($64 \to 32$), ensuring zero wasted addressing space.
