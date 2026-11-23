@@ -3,6 +3,7 @@
 **Project:** Project 7 – 2-Way Set-Associative Cache with LRU vs Direct-Mapped Baseline  
 **Course:** MCA Capstone Design - Advanced Computer Architecture  
 **Owner:** Member 1 (2-Way Cache RTL & Synthesis/Resource Report)  
+**Issue:** Closes #12  
 **Date:** November 23, 2026  
 **Tools Used:** Yosys Open SYnthesis Suite (v0.71+post)  
 **Target Designs:** `rtl/cache_2way_lru.v` (`cache_2way_lru`) and `rtl/cache_direct.v` (`cache_direct`)  

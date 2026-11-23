@@ -3,6 +3,7 @@
 **Course:** MCA Capstone Design - Advanced Computer Architecture  
 **Project:** Project 7 – 2-Way Set-Associative Cache with LRU vs Direct-Mapped Baseline  
 **Author:** Member 1 (2-Way Cache RTL & Synthesis/Resource Report)  
+**Issue:** Closes #12  
 **Date:** November 23, 2026  
 
 ---
