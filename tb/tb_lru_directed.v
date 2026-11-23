@@ -189,6 +189,11 @@ module tb_lru_directed;
         u_mem.mem_array[32'h0000_0220 >> 2] = 32'hA0A0_0011; // Set 2, tag 1 (A)
         u_mem.mem_array[32'h0000_0420 >> 2] = 32'hB0B0_0022; // Set 2, tag 2 (B)
         u_mem.mem_array[32'h0000_0620 >> 2] = 32'hC0C0_0033; // Set 2, tag 3 (C)
+        u_mem.mem_array[32'h0000_0230 >> 2] = 32'hD0D0_0001; // Set 3, tag 1 (P)
+        u_mem.mem_array[32'h0000_0430 >> 2] = 32'hD1D1_0002; // Set 3, tag 2 (Q, before write)
+        u_mem.mem_array[32'h0000_0630 >> 2] = 32'hD2D2_0003; // Set 3, tag 3 (R, before write)
+        u_mem.mem_array[32'h0000_0240 >> 2] = 32'hE0E0_0001; // Set 4, tag 1 (X)
+        u_mem.mem_array[32'h0000_0440 >> 2] = 32'hE1E1_0002; // Set 4, tag 2 (Y)
 
         #20;
         @(posedge clk);
@@ -454,6 +459,120 @@ module tb_lru_directed;
         end
         if (errors == 0)
             $display("  PASS: 10/10 outcomes, way contents and LRU bits match the hand-derived table");
+
+        // --------------------------------------------------------------------
+        // Test 11: A WRITE MISS must not allocate and must not change LRU
+        // Set 3 is untouched so far. P/Q/R = tags 1/2/3.
+        // --------------------------------------------------------------------
+        test_step = 11;
+        $display("[Step %0d] Write miss: no allocation, LRU and ways unchanged", test_step);
+
+        // 11a: read P -> Way 0 = P, lru[3] = 1 (Way 1 empty)
+        cpu_read(32'h0000_0230, data_out, hit_flag);
+        if (hit_flag || data_out !== 32'hD0D0_0001 || uut_cache.lru[3] !== 1'b1) begin
+            $display("  FAIL: 11a expected miss on P with D0D00001 and lru[3]=1, got hit=%b data=%h lru=%b",
+                     hit_flag, data_out, uut_cache.lru[3]);
+            errors = errors + 1;
+        end
+
+        // 11b: write MISS to Q (not cached) -> Way 1 must stay empty, lru[3] must stay 1
+        cpu_write(32'h0000_0430, 32'h5151_5151, hit_flag);
+        repeat (8) @(posedge clk);
+        if (hit_flag) begin
+            $display("  FAIL: 11b write to Q should be a MISS");
+            errors = errors + 1;
+        end
+        if (uut_cache.valid1[3] !== 1'b0 || uut_cache.valid0[3] !== 1'b1 ||
+            uut_cache.tag0[3] !== 23'd1 || uut_cache.lru[3] !== 1'b1) begin
+            $display("  FAIL: 11b write miss changed the cache (valid0=%b valid1=%b tag0=%0d lru=%b)",
+                     uut_cache.valid0[3], uut_cache.valid1[3], uut_cache.tag0[3], uut_cache.lru[3]);
+            errors = errors + 1;
+        end
+        if (u_mem.mem_array[32'h0000_0430 >> 2] !== 32'h5151_5151) begin
+            $display("  FAIL: 11b write-through did not reach memory, got %h",
+                     u_mem.mem_array[32'h0000_0430 >> 2]);
+            errors = errors + 1;
+        end
+
+        // 11c: read Q -> still a MISS (it was never allocated), returns the written value
+        cpu_read(32'h0000_0430, data_out, hit_flag);
+        if (hit_flag || data_out !== 32'h5151_5151) begin
+            $display("  FAIL: 11c expected miss on Q returning 51515151, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end
+        // now Way0=P, Way1=Q, lru[3]=0 (P is LRU)
+        if (uut_cache.lru[3] !== 1'b0 || uut_cache.tag1[3] !== 23'd2) begin
+            $display("  FAIL: 11c expected Way1=Q and lru[3]=0, got tag1=%0d lru=%b", uut_cache.tag1[3], uut_cache.lru[3]);
+            errors = errors + 1;
+        end
+
+        // 11d: write MISS to R with BOTH ways valid -> nothing evicted, lru[3] stays 0
+        cpu_write(32'h0000_0630, 32'h5252_5252, hit_flag);
+        repeat (8) @(posedge clk);
+        if (hit_flag) begin
+            $display("  FAIL: 11d write to R should be a MISS");
+            errors = errors + 1;
+        end
+        if (uut_cache.tag0[3] !== 23'd1 || uut_cache.tag1[3] !== 23'd2 || uut_cache.lru[3] !== 1'b0) begin
+            $display("  FAIL: 11d write miss disturbed Set 3 (tag0=%0d tag1=%0d lru=%b)",
+                     uut_cache.tag0[3], uut_cache.tag1[3], uut_cache.lru[3]);
+            errors = errors + 1;
+        end
+
+        // 11e: P and Q must both still HIT
+        cpu_read(32'h0000_0230, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'hD0D0_0001) begin
+            $display("  FAIL: 11e P should still hit, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end
+        cpu_read(32'h0000_0430, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'h5151_5151) begin
+            $display("  FAIL: 11e Q should still hit with 51515151, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Write misses did not allocate, evict or change LRU (write-through reached memory)");
+        end
+
+        // --------------------------------------------------------------------
+        // Test 12: An INVALID way must be chosen before the LRU way
+        // Normally lru already points at the empty way after a fill, so we use a
+        // hierarchical write to put lru[4] on the VALID way, then check the miss
+        // still goes to the empty way.
+        // --------------------------------------------------------------------
+        test_step = 12;
+        $display("[Step %0d] Invalid way is chosen before the LRU way", test_step);
+
+        // 12a: read X -> Way 0 = X, Way 1 empty, lru[4] = 1
+        cpu_read(32'h0000_0240, data_out, hit_flag);
+        if (hit_flag || data_out !== 32'hE0E0_0001 || uut_cache.valid1[4] !== 1'b0) begin
+            $display("  FAIL: 12a expected miss on X with E0E00001 and Way 1 empty");
+            errors = errors + 1;
+        end
+
+        // 12b: force the LRU bit to point at the VALID way (Way 0) while Way 1 is empty
+        uut_cache.lru[4] = 1'b0;
+        @(posedge clk);
+
+        // 12c: read Y -> miss; invalid Way 1 must be used, X must survive in Way 0
+        cpu_read(32'h0000_0440, data_out, hit_flag);
+        if (hit_flag || data_out !== 32'hE1E1_0002) begin
+            $display("  FAIL: 12c expected miss on Y with E1E10002, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end
+        if (uut_cache.tag0[4] !== 23'd1 || uut_cache.tag1[4] !== 23'd2 ||
+            uut_cache.valid0[4] !== 1'b1 || uut_cache.valid1[4] !== 1'b1) begin
+            $display("  FAIL: 12c expected Way0=X (kept) and Way1=Y, got tag0=%0d tag1=%0d", uut_cache.tag0[4], uut_cache.tag1[4]);
+            errors = errors + 1;
+        end
+
+        // 12d: X must still HIT
+        cpu_read(32'h0000_0240, data_out, hit_flag);
+        if (!hit_flag || data_out !== 32'hE0E0_0001) begin
+            $display("  FAIL: 12d X should still hit, got hit=%b data=%h", hit_flag, data_out);
+            errors = errors + 1;
+        end else begin
+            $display("  PASS: Empty way used before LRU way (valid X was not evicted)");
+        end
 
         // --------------------------------------------------------------------
         // Final Summary Banner
