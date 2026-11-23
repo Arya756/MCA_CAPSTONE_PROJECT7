@@ -130,15 +130,18 @@ Generated dynamically into `results/results.csv`:
 
 ---
 
-## Synthesis with Yosys
+## Synthesis and Resource Utilization (Phase II)
 
-To synthesize either design and inspect cell/flip-flop utilization:
+To execute reproducible logic synthesis across both cache architectures for Generic, AMD/Xilinx 7-Series, and Lattice ECP5 FPGA flows:
 
 ```bash
-# Synthesize 2-Way Cache with True LRU:
-yosys -p "read_verilog -sv rtl/cache_2way_lru.v; synth -top cache_2way_lru; stat"
-
-# Synthesize Direct-Mapped Baseline:
-yosys -p "read_verilog -sv rtl/cache_direct.v; synth -top cache_direct; stat"
+# Run one-command synthesis suite:
+./scripts/synth_all.sh
 ```
-See [`results/yosys_cmd.txt`](results/yosys_cmd.txt) for advanced scripting options.
+
+### Outputs & Comparison Table:
+- Raw synthesis logs: `results/synth_2way_generic.log`, `results/synth_direct_generic.log`, `results/synth_2way_xilinx.log`, etc.
+- Structured resource comparison table: [`results/resource_table.md`](results/resource_table.md) and [`results/resource_table.csv`](results/resource_table.csv).
+- Detailed architectural analysis and limitations: [`docs/SECTION_RESOURCES.md`](docs/SECTION_RESOURCES.md).
+
+For manual one-liner commands and advanced scripting options, see [`results/yosys_cmd.txt`](results/yosys_cmd.txt).
