@@ -23,6 +23,14 @@
 `define WR_LAT 4
 `endif
 
+`ifndef CACHE_CAPACITY
+`define CACHE_CAPACITY 1024
+`endif
+
+`ifndef BLOCK_SIZE
+`define BLOCK_SIZE 16
+`endif
+
 module tb_compare;
 
     reg clk;
@@ -99,8 +107,8 @@ module tb_compare;
     cache_2way_lru #(
         .ADDR_WIDTH(32),
         .DATA_WIDTH(32),
-        .CACHE_CAPACITY(1024),
-        .BLOCK_SIZE(16),
+        .CACHE_CAPACITY(`CACHE_CAPACITY),
+        .BLOCK_SIZE(`BLOCK_SIZE),
         .NUM_WAYS(2)
     ) dut_2way (
         .clk(clk),
@@ -125,6 +133,7 @@ module tb_compare;
     main_memory #(
         .RD_LAT(`RD_LAT),
         .WR_LAT(`WR_LAT),
+        .BLOCK_SIZE(`BLOCK_SIZE),
         .MEM_WORDS(4096)
     ) mem_2way_inst (
         .clk(clk),
@@ -140,8 +149,8 @@ module tb_compare;
     cache_direct #(
         .ADDR_WIDTH(32),
         .DATA_WIDTH(32),
-        .CACHE_CAPACITY(1024),
-        .BLOCK_SIZE(16)
+        .CACHE_CAPACITY(`CACHE_CAPACITY),
+        .BLOCK_SIZE(`BLOCK_SIZE)
     ) dut_direct (
         .clk(clk),
         .rst(rst_dir),
@@ -165,6 +174,7 @@ module tb_compare;
     main_memory #(
         .RD_LAT(`RD_LAT),
         .WR_LAT(`WR_LAT),
+        .BLOCK_SIZE(`BLOCK_SIZE),
         .MEM_WORDS(4096)
     ) mem_direct_inst (
         .clk(clk),

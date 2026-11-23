@@ -110,10 +110,10 @@ module cache_2way_lru #(
     // Derived Architectural Constants
     // ------------------------------------------------------------------------
     localparam integer WORDS_PER_BLOCK = BLOCK_SIZE / (DATA_WIDTH / 8);        // 4 words (16B / 4B)
-    localparam integer NUM_SETS        = CACHE_CAPACITY / (BLOCK_SIZE * NUM_WAYS); // 32 sets
-    localparam integer OFFSET_BITS     = 4;                                    // log2(16)
-    localparam integer INDEX_BITS      = 5;                                    // log2(32)
-    localparam integer TAG_BITS        = ADDR_WIDTH - INDEX_BITS - OFFSET_BITS; // 32 - 5 - 4 = 23 bits
+    localparam integer NUM_SETS        = CACHE_CAPACITY / (BLOCK_SIZE * NUM_WAYS); // sets = capacity / (block_size * ways)
+    localparam integer OFFSET_BITS     = $clog2(BLOCK_SIZE);                    // log2(BLOCK_SIZE)
+    localparam integer INDEX_BITS      = $clog2(NUM_SETS);                      // log2(NUM_SETS)
+    localparam integer TAG_BITS        = ADDR_WIDTH - INDEX_BITS - OFFSET_BITS; // 32 - index - offset
 
     // ------------------------------------------------------------------------
     // Cache Storage Arrays
@@ -160,7 +160,8 @@ module cache_2way_lru #(
     // ------------------------------------------------------------------------
     wire [TAG_BITS-1:0]   req_tag      = req_addr[31 : 32 - TAG_BITS];       // bits [31:9] (23 bits)
     wire [INDEX_BITS-1:0] req_index    = req_addr[OFFSET_BITS + INDEX_BITS - 1 : OFFSET_BITS]; // bits [8:4] (5 bits)
-    wire [1:0]            req_word_sel = req_addr[3:2];                      // bits [3:2] word offset
+    localparam integer WORD_SEL_BITS   = (WORDS_PER_BLOCK > 1) ? $clog2(WORDS_PER_BLOCK) : 1;
+    wire [WORD_SEL_BITS-1:0] req_word_sel = req_addr[OFFSET_BITS - 1 : 2];
 
     // ------------------------------------------------------------------------
     // Parallel Tag Comparison Logic
@@ -185,8 +186,8 @@ module cache_2way_lru #(
     // ------------------------------------------------------------------------
     // Refill Burst Buffer & Counter
     // ------------------------------------------------------------------------
-    reg [DATA_WIDTH-1:0] refill_buf [0:WORDS_PER_BLOCK-1]; // Holds burst words 0, 1, 2
-    reg [1:0]            refill_count;                     // Counts incoming words 0 to 3
+    reg [DATA_WIDTH-1:0] refill_buf [0:WORDS_PER_BLOCK-1]; // Holds burst words
+    reg [3:0]            refill_count;                     // Counts incoming words
 
     integer idx, w_idx;
 
@@ -294,12 +295,11 @@ module cache_2way_lru #(
 
                         if (!req_we) begin
                             // Read Miss:
-                            // Initiate 4-word block read from main memory
-                            // Address aligned to 16-byte boundary: {req_addr[31:4], 4'b0000}
+                            // Initiate block read from main memory
                             mem_req      <= 1'b1;
                             mem_we       <= 1'b0;
-                            mem_addr     <= {req_addr[31:4], 4'b0000};
-                            refill_count <= 2'b00;
+                            mem_addr     <= {req_addr[31 : OFFSET_BITS], {OFFSET_BITS{1'b0}}};
+                            refill_count <= 4'd0;
                             state        <= STATE_MISS_FETCH;
                         end else begin
                             // Write Miss (No-Write-Allocate):
@@ -315,7 +315,7 @@ module cache_2way_lru #(
                 end
 
                 // ------------------------------------------------------------
-                // STATE_MISS_FETCH: Memory Read Latency & 4-Word Burst Refill
+                // STATE_MISS_FETCH: Memory Read Latency & Block Burst Refill
                 // ------------------------------------------------------------
                 STATE_MISS_FETCH: begin
                     // Deassert mem_req once memory has accepted the request
@@ -326,23 +326,22 @@ module cache_2way_lru #(
                         refill_buf[refill_count] <= mem_rdata;
                         refill_count <= refill_count + 1;
 
-                        if (refill_count == 2'd3) begin
-                            // Word 3 received (last word of 16-byte block):
-                            // Refill the selected victim way with all 4 words
+                        if (refill_count == (WORDS_PER_BLOCK - 1)) begin
+                            // Last word of block received: refill selected victim way
                             if (victim_way == 1'b1) begin
                                 valid1[req_index]       <= 1'b1;
                                 tag1[req_index]         <= req_tag;
-                                data1[req_index][0]     <= refill_buf[0];
-                                data1[req_index][1]     <= refill_buf[1];
-                                data1[req_index][2]     <= refill_buf[2];
-                                data1[req_index][3]     <= mem_rdata;
+                                for (w_idx = 0; w_idx < WORDS_PER_BLOCK - 1; w_idx = w_idx + 1) begin
+                                    data1[req_index][w_idx] <= refill_buf[w_idx];
+                                end
+                                data1[req_index][WORDS_PER_BLOCK - 1] <= mem_rdata;
                             end else begin
                                 valid0[req_index]       <= 1'b1;
                                 tag0[req_index]         <= req_tag;
-                                data0[req_index][0]     <= refill_buf[0];
-                                data0[req_index][1]     <= refill_buf[1];
-                                data0[req_index][2]     <= refill_buf[2];
-                                data0[req_index][3]     <= mem_rdata;
+                                for (w_idx = 0; w_idx < WORDS_PER_BLOCK - 1; w_idx = w_idx + 1) begin
+                                    data0[req_index][w_idx] <= refill_buf[w_idx];
+                                end
+                                data0[req_index][WORDS_PER_BLOCK - 1] <= mem_rdata;
                             end
 
                             // LRU Update Rule on Refill:
@@ -350,7 +349,7 @@ module cache_2way_lru #(
                             lru[req_index] <= ~victim_way;
 
                             // Forward requested word directly to CPU read data bus
-                            if (req_word_sel == 2'd3)
+                            if (req_word_sel == (WORDS_PER_BLOCK - 1))
                                 cpu_rdata <= mem_rdata;
                             else
                                 cpu_rdata <= refill_buf[req_word_sel];
