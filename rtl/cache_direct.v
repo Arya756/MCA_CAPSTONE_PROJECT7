@@ -62,11 +62,11 @@ module cache_direct #(
     // ------------------------------------------------------------------------
     // Derived Architecture Parameters
     // ------------------------------------------------------------------------
-    localparam integer WORDS_PER_BLOCK = BLOCK_SIZE / (DATA_WIDTH / 8); // 4
-    localparam integer NUM_LINES       = CACHE_CAPACITY / BLOCK_SIZE;   // 64
-    localparam integer OFFSET_BITS     = 4;                             // log2(16)
-    localparam integer INDEX_BITS      = 6;                             // log2(64)
-    localparam integer TAG_BITS        = ADDR_WIDTH - INDEX_BITS - OFFSET_BITS; // 22
+    localparam integer WORDS_PER_BLOCK = BLOCK_SIZE / (DATA_WIDTH / 8); // 4 words by default
+    localparam integer NUM_LINES       = CACHE_CAPACITY / BLOCK_SIZE;   // lines = capacity / block_size
+    localparam integer OFFSET_BITS     = $clog2(BLOCK_SIZE);            // log2(BLOCK_SIZE)
+    localparam integer INDEX_BITS      = $clog2(NUM_LINES);             // log2(NUM_LINES)
+    localparam integer TAG_BITS        = ADDR_WIDTH - INDEX_BITS - OFFSET_BITS; // 32 - index - offset
 
     // ------------------------------------------------------------------------
     // Cache Storage Arrays
@@ -94,11 +94,12 @@ module cache_direct #(
     // Address breakdown wires
     wire [TAG_BITS-1:0]   req_tag      = req_addr[31 : 32 - TAG_BITS];       // [31:10]
     wire [INDEX_BITS-1:0] req_index    = req_addr[OFFSET_BITS + INDEX_BITS - 1 : OFFSET_BITS]; // [9:4]
-    wire [1:0]            req_word_sel = req_addr[3:2];
+    localparam integer WORD_SEL_BITS   = (WORDS_PER_BLOCK > 1) ? $clog2(WORDS_PER_BLOCK) : 1;
+    wire [WORD_SEL_BITS-1:0] req_word_sel = req_addr[OFFSET_BITS - 1 : 2];
 
-    // Refill buffer for 4-word block burst
+    // Refill buffer for block burst
     reg [DATA_WIDTH-1:0] refill_buf [0:WORDS_PER_BLOCK-1];
-    reg [1:0]            refill_count;
+    reg [3:0]            refill_count;
 
     integer idx, w_idx;
 
@@ -181,8 +182,8 @@ module cache_direct #(
                             // Read Miss: fetch 16-byte block from memory
                             mem_req      <= 1'b1;
                             mem_we       <= 1'b0;
-                            mem_addr     <= {req_addr[31:4], 4'b0000};
-                            refill_count <= 2'b00;
+                            mem_addr     <= {req_addr[31 : OFFSET_BITS], {OFFSET_BITS{1'b0}}};
+                            refill_count <= 4'd0;
                             state        <= STATE_MISS_FETCH;
                         end else begin
                             // Write Miss (No-Write-Allocate): send straight to memory
@@ -202,18 +203,18 @@ module cache_direct #(
                         refill_buf[refill_count] <= mem_rdata;
                         refill_count <= refill_count + 1;
 
-                        if (refill_count == 2'd3) begin
+                        if (refill_count == (WORDS_PER_BLOCK - 1)) begin
                             // Final word of block received: refill cache line
                             valid_array[req_index] <= 1'b1;
                             tag_array[req_index]   <= req_tag;
 
-                            data_array[req_index][0] <= refill_buf[0];
-                            data_array[req_index][1] <= refill_buf[1];
-                            data_array[req_index][2] <= refill_buf[2];
-                            data_array[req_index][3] <= mem_rdata;
+                            for (w_idx = 0; w_idx < WORDS_PER_BLOCK - 1; w_idx = w_idx + 1) begin
+                                data_array[req_index][w_idx] <= refill_buf[w_idx];
+                            end
+                            data_array[req_index][WORDS_PER_BLOCK - 1] <= mem_rdata;
 
                             // Return requested word to CPU
-                            if (req_word_sel == 2'd3)
+                            if (req_word_sel == (WORDS_PER_BLOCK - 1))
                                 cpu_rdata <= mem_rdata;
                             else
                                 cpu_rdata <= refill_buf[req_word_sel];

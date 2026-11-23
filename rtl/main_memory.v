@@ -32,9 +32,10 @@
 `timescale 1ns / 1ps
 
 module main_memory #(
-    parameter integer RD_LAT    = 8,     // Latency in cycles before block-read burst
-    parameter integer WR_LAT    = 4,     // Latency in cycles for single-word write
-    parameter integer MEM_WORDS = 4096   // Total memory capacity (4096 words = 16 KB)
+    parameter integer RD_LAT     = 8,     // Latency in cycles before block-read burst
+    parameter integer WR_LAT     = 4,     // Latency in cycles for single-word write
+    parameter integer BLOCK_SIZE = 16,    // Block size in bytes (burst unit)
+    parameter integer MEM_WORDS  = 4096   // Total memory capacity (4096 words = 16 KB)
 ) (
     input  wire        clk,
     input  wire        rst,
@@ -48,6 +49,11 @@ module main_memory #(
     output reg         mem_ready,        // Ready strobe / data valid
     output reg  [31:0] mem_rdata         // Read data output
 );
+
+    // Derived block parameters
+    localparam integer WORDS_PER_BLOCK = BLOCK_SIZE / 4;
+    localparam integer OFFSET_BITS     = $clog2(BLOCK_SIZE);
+    localparam integer WORD_SEL_BITS   = (WORDS_PER_BLOCK > 1) ? $clog2(WORDS_PER_BLOCK) : 1;
 
     // ------------------------------------------------------------------------
     // Backing Storage: 4096 x 32-bit words
@@ -63,8 +69,8 @@ module main_memory #(
 
     reg [1:0]  state;
     reg [31:0] timer;
-    reg [1:0]  burst_idx;
-    reg [11:0] latched_block_base;       // Base word index of 4-word block
+    reg [3:0]  burst_idx;
+    reg [11:0] latched_block_base;       // Base word index of block
     reg [11:0] latched_word_addr;        // Word index for write
     reg [31:0] latched_wdata;
 
@@ -97,14 +103,13 @@ module main_memory #(
 
                     if (mem_req) begin
                         if (!mem_we) begin
-                            // Read request for a 4-word block
-                            // Address bits [13:4] represent the block index within 16KB
-                            latched_block_base <= {mem_addr[13:4], 2'b00};
+                            // Read request for block
+                            latched_block_base <= {mem_addr[13 : OFFSET_BITS], {WORD_SEL_BITS{1'b0}}};
                             if (RD_LAT <= 1) begin
                                 // Immediate burst start
                                 state     <= STATE_READ_BURST;
                                 mem_ready <= 1'b1;
-                                mem_rdata <= mem_array[{mem_addr[13:4], 2'b00}];
+                                mem_rdata <= mem_array[{mem_addr[13 : OFFSET_BITS], {WORD_SEL_BITS{1'b0}}}];
                                 burst_idx <= 1;
                             end else begin
                                 timer <= 1;
@@ -129,7 +134,7 @@ module main_memory #(
                 STATE_READ_WAIT: begin
                     timer <= timer + 1;
                     if (timer >= RD_LAT - 1) begin
-                        // Latency completed: start 4-cycle burst on next cycle
+                        // Latency completed: start burst on next cycle
                         state     <= STATE_READ_BURST;
                         burst_idx <= 1;
                         mem_ready <= 1'b1;
@@ -138,13 +143,13 @@ module main_memory #(
                 end
 
                 STATE_READ_BURST: begin
-                    // Deliver consecutive words of the 16-byte block
+                    // Deliver consecutive words of the cache block
                     mem_rdata <= mem_array[latched_block_base + burst_idx];
                     mem_ready <= 1'b1;
                     burst_idx <= burst_idx + 1;
 
-                    if (burst_idx == 2'd3) begin
-                        // 4th word delivered, complete burst
+                    if (burst_idx == (WORDS_PER_BLOCK - 1)) begin
+                        // Final word delivered, complete burst
                         state <= STATE_IDLE;
                     end
                 end

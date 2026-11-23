@@ -1,0 +1,19 @@
+design,trace,accesses,hits,misses,hit_rate_pct,miss_rate_pct,amat_classical,amat_exact,measured_cpa,gap_classical,gap_exact,explanation
+2way,seq_stream,256,192,64,75.0,25.0,5.5,5.0,5.0,-0.5,0.0,Exact 100% parity with hardware incremental AMAT formula
+direct,seq_stream,256,192,64,75.0,25.0,5.5,5.0,5.0,-0.5,0.0,Exact 100% parity with hardware incremental AMAT formula
+2way,small_loop,640,624,16,97.5,2.5,2.35,2.3,2.3,-0.05,0.0,Exact 100% parity with hardware incremental AMAT formula
+direct,small_loop,640,624,16,97.5,2.5,2.35,2.3,2.3,-0.05,0.0,Exact 100% parity with hardware incremental AMAT formula
+2way,pingpong,200,198,2,99.0,1.0,2.14,2.12,2.12,-0.02,0.0,Exact 100% parity with hardware incremental AMAT formula
+direct,pingpong,200,0,200,0.0,100.0,16.0,14.0,14.0,-2.0,0.0,Exact 100% parity with hardware incremental AMAT formula
+2way,cyclic3,300,0,300,0.0,100.0,16.0,14.0,14.0,-2.0,0.0,Exact 100% parity with hardware incremental AMAT formula
+direct,cyclic3,300,0,300,0.0,100.0,16.0,14.0,14.0,-2.0,0.0,Exact 100% parity with hardware incremental AMAT formula
+2way,strided,256,248,8,96.88,3.12,2.4375,2.375,2.375,-0.0625,0.0,Exact 100% parity with hardware incremental AMAT formula
+direct,strided,256,248,8,96.88,3.12,2.4375,2.375,2.375,-0.0625,0.0,Exact 100% parity with hardware incremental AMAT formula
+2way,random,300,22,278,7.33,92.67,14.9733,13.12,13.12,-1.8533,0.0,Exact 100% parity with hardware incremental AMAT formula
+direct,random,300,18,282,6.0,94.0,15.16,13.28,13.28,-1.88,0.0,Exact 100% parity with hardware incremental AMAT formula
+2way,mixed_rw,300,244,56,81.33,18.67,4.6133,4.24,4.9967,0.3833,0.7567,Gap due to unbuffered write-through (103 writes stall 7 cycles each)
+direct,mixed_rw,300,244,56,81.33,18.67,4.6133,4.24,4.9967,0.3833,0.7567,Gap due to unbuffered write-through (103 writes stall 7 cycles each)
+2way,large_loop,384,0,384,0.0,100.0,16.0,14.0,14.0,-2.0,0.0,Exact 100% parity with hardware incremental AMAT formula
+direct,large_loop,384,96,288,25.0,75.0,12.5,11.0,11.0,-1.5,0.0,Exact 100% parity with hardware incremental AMAT formula
+2way,hot_stream,400,363,37,90.75,9.25,3.295,3.11,3.11,-0.185,0.0,Exact 100% parity with hardware incremental AMAT formula
+direct,hot_stream,400,347,53,86.75,13.25,3.855,3.59,3.59,-0.265,0.0,Exact 100% parity with hardware incremental AMAT formula

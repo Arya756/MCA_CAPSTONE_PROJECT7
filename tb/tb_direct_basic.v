@@ -51,14 +51,26 @@ module tb_direct_basic;
     integer mem_req_count;
     reg     prev_mem_req;
 
+    // Strengthened memory state monitor (watches memory FSM leave STATE_IDLE: 2'b00)
+    integer mem_idle_departures;
+    reg [1:0] prev_mem_state;
+
     always @(posedge clk or posedge rst) begin
         if (rst) begin
-            mem_req_count <= 0;
-            prev_mem_req  <= 1'b0;
+            mem_req_count        <= 0;
+            prev_mem_req         <= 1'b0;
+            mem_idle_departures  <= 0;
+            prev_mem_state       <= 2'b00;
         end else begin
-            prev_mem_req <= mem_req;
+            prev_mem_req   <= mem_req;
+            prev_mem_state <= u_mem.state;
+
             if (mem_req && !prev_mem_req) begin
                 mem_req_count <= mem_req_count + 1;
+            end
+
+            if (prev_mem_state == 2'b00 && u_mem.state != 2'b00) begin
+                mem_idle_departures <= mem_idle_departures + 1;
             end
         end
     end
@@ -397,13 +409,16 @@ module tb_direct_basic;
         // Final Summary Banner & Memory Transaction Verification
         // --------------------------------------------------------------------
         $display("------------------------------------------------------------");
-        $display("MEMORY TRANSACTION MONITOR:");
+        $display("MEMORY TRANSACTION & STATE MONITOR:");
         $display("  Observed memory transactions (rising edges of mem_req): %0d", mem_req_count);
+        $display("  Observed memory departures from STATE_IDLE:             %0d", mem_idle_departures);
         $display("  Expected memory transactions (read misses + writes):     %0d", 8);
-        if (mem_req_count == 8) begin
-            $display("  Transaction Count Comparison: MATCH (Observed %0d == Expected %0d)", mem_req_count, 8);
+        if (mem_req_count == 8 && mem_idle_departures == 8) begin
+            $display("  Transaction & State Count Comparison: MATCH (Observed %0d == Expected %0d)", mem_req_count, 8);
         end else begin
-            $display("  Transaction Count Comparison: MISMATCH! (Observed %0d != Expected %0d)", mem_req_count, 8);
+            $display("  Transaction & State Count Comparison: MISMATCH! (reqs=%0d, idle_departures=%0d, expected=%0d)",
+                     mem_req_count, mem_idle_departures, 8);
+            errors = errors + 1;
         end
         $display("------------------------------------------------------------");
         if (errors == 0) begin
