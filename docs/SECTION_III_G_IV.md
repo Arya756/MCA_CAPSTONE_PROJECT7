@@ -144,6 +144,10 @@ The table below presents cycle-accurate simulation results across all 9 determin
 | `large_loop` | Direct-Mapped | 384 | 96 | 288 | **25.00%** | **4,224** | 32 non-colliding lines hit repeatedly (**Direct is better**) |
 | `hot_stream` | 2-Way LRU | 400 | 363 | 37 | **90.75%** | **1,244** | 2nd way shields hot data from cold stream (**13.4% faster**) |
 | `hot_stream` | Direct-Mapped | 400 | 347 | 53 | **86.75%** | **1,436** | Cold stream evicts hot lines on alias collisions |
+| `matrix_walk` | 2-Way LRU | 512 | 448 | 64 | **87.50%** | **1,792** | 16x16 matrix: row-major spatial locality vs column-major (Phase II) |
+| `matrix_walk` | Direct-Mapped | 512 | 448 | 64 | **87.50%** | **1,792** | Identical spatial locality benefits across both architectures |
+| `write_heavy` | 2-Way LRU | 640 | 483 | 157 | **75.47%** | **4,244** | 80% writes, 20% reads: write-through stalls dominate (Phase II) |
+| `write_heavy` | Direct-Mapped | 640 | 483 | 157 | **75.47%** | **4,244** | Write penalty identical regardless of set associativity |
 
 ### B. Analytical Cycle Verification
 
@@ -168,6 +172,7 @@ Where:
 - `large_loop` (Direct): $(96 \times 2) + (288 \times 14) = 192 + 4,032 = 4,224$ cycles ✓
 - `hot_stream` (2-Way): $(363 \times 2) + (37 \times 14) = 726 + 518 = 1,244$ cycles ✓
 - `hot_stream` (Direct): $(347 \times 2) + (53 \times 14) = 694 + 742 = 1,436$ cycles ✓
+- `matrix_walk`: $(448 \times 2) + (64 \times 14) = 896 + 896 = 1,792$ cycles ✓
 
 For `mixed_rw` (which contains 197 reads and 103 writes):
 $$\text{Total Cycles} = (165 \times 2) + (32 \times 14) + (103 \times 7) = 330 + 448 + 721 = 1,499\text{ cycles} \quad \checkmark$$
@@ -175,5 +180,7 @@ $$\text{Total Cycles} = (165 \times 2) + (32 \times 14) + (103 \times 7) = 330 +
 ### C. Visualizations
 
 Generated automatically into `results/` and `docs/img/` by `scripts/plot_results.py`:
-- **`results/hit_rate.png` / `docs/img/hit_rate.png`**: Side-by-side bar chart of hit rates across all 9 workloads.
-- **`results/cycles.png` / `docs/img/cycles.png`**: Side-by-side bar chart of execution cycles across all 9 workloads.
+- **`results/hit_rate.png` / `docs/img/hit_rate.png`**: Side-by-side bar chart of hit rates across all 11 workloads.
+- **`results/cycles.png` / `docs/img/cycles.png`**: Side-by-side bar chart of execution cycles across all 11 workloads.
+- **`results/sweep_rd_lat.png` / `docs/img/sweep_rd_lat.png`**: Sensitivity of total execution cycles to read miss latency (RD_LAT sweep).
+- **`results/sweep_wr_lat.png` / `docs/img/sweep_wr_lat.png`**: Sensitivity of total execution cycles to write-through latency (WR_LAT sweep).
