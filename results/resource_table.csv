@@ -1,0 +1,33 @@
+flow,target_family,tool,version,command,metric,cache_2way_lru,cache_direct,delta_2way_minus_direct,notes
+generic,Technology-Independent,Yosys,0.71,"synth -top <module>; stat",Total Cells,35643,39809,-4166,Direct-mapped synthesizes larger multiplexer trees for 64 lines vs 32 sets
+generic,Technology-Independent,Yosys,0.71,"synth -top <module>; stat",Flip-Flops,10122,10026,96,Exactly +96 FFs: +64 tag bits and +32 LRU bits
+generic,Technology-Independent,Yosys,0.71,"synth -top <module>; stat",$_MUX_ Cells,4346,8410,-4064,Direct-mapped 64-to-1 word mux tree requires nearly 2x multiplexers
+generic,Technology-Independent,Yosys,0.71,"synth -top <module>; stat",$_AND_ Cells,14491,13746,745,Extra tag comparison and hit-routing logic in 2-way
+generic,Technology-Independent,Yosys,0.71,"synth -top <module>; stat",$_NOR_ Cells,4992,5209,-217,Control logic and address decoding
+generic,Technology-Independent,Yosys,0.71,"synth -top <module>; stat",$_ANDNOT_ Cells,969,1646,-677,Decoders and bit-masking logic
+generic,Technology-Independent,Yosys,0.71,"synth -top <module>; stat",$_OR_ Cells,341,405,-64,Hit detection OR gate and control signals
+generic,Technology-Independent,Yosys,0.71,"synth -top <module>; stat",$_NAND_ Cells,156,83,73,Tag comparison logic
+generic,Technology-Independent,Yosys,0.71,"synth -top <module>; stat",$_XOR_ Cells,113,90,23,Tag comparator equality XORs
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",Total Cells,17411,20460,-3049,Direct-mapped requires more LUTs and muxes for 64-line multiplexer
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",Total LUTs (LUT2-LUT6),6699,9352,-2653,Direct-mapped uses 5319 LUT5s vs 2487 in 2-way due to 64-line muxing
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",LUT2,190,164,26,Combinational logic
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",LUT3,259,190,69,Combinational logic
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",LUT4,938,518,420,Tag comparison and LRU logic
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",LUT5,2487,5319,-2832,Direct-mapped 64-line word multiplexer tree consumes extra LUT5s
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",LUT6,2825,3161,-336,Wider multiplexing and state decoding
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",FDCE (Storage FFs),10026,9930,96,Storage arrays mapped to discrete FFs due to combinational reads
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",FDRE (Counter FFs),96,96,0,Three 32-bit performance counters in both modules (hit miss cycle)
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",Total Flip-Flops,10122,10026,96,Exactly matches architectural delta: +64 tag bits + 32 LRU bits
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",Block RAM (RAMB18/36),0,0,0,0 BRAM inferred: combinational reads require discrete register storage
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",Distributed RAM (LUTRAM),0,0,0,0 LUTRAM inferred: Yosys maps storage array to flip-flop banks
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",MUXF7,190,504,-314,Hardware multiplexer primitives for line data selection
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",MUXF8,74,252,-178,Hardware multiplexer primitives for line data selection
+fpga_xilinx,AMD Xilinx 7-Series,Yosys,0.71,"synth_xilinx -top <module>; stat",CARRY4,25,25,0,Adder chains for the three 32-bit counters in both modules
+fpga_ecp5,Lattice ECP5 85k,Yosys,0.71,"synth_ecp5 -top <module>; stat",Total Cells,30296,35466,-5170,Direct-mapped synthesizes more LUT4s and PFUMX cells
+fpga_ecp5,Lattice ECP5 85k,Yosys,0.71,"synth_ecp5 -top <module>; stat",Total LUT4s,14807,18541,-3734,Direct-mapped 64-line multiplexer consumes extra LUT4s
+fpga_ecp5,Lattice ECP5 85k,Yosys,0.71,"synth_ecp5 -top <module>; stat",TRELLIS_FF,10122,10026,96,Storage arrays mapped to discrete TRELLIS_FF registers
+fpga_ecp5,Lattice ECP5 85k,Yosys,0.71,"synth_ecp5 -top <module>; stat",PFUMX,4502,6165,-1663,Slice multiplexer primitives
+fpga_ecp5,Lattice ECP5 85k,Yosys,0.71,"synth_ecp5 -top <module>; stat",L6MUX21,817,686,131,Wider multiplexer primitives
+fpga_ecp5,Lattice ECP5 85k,Yosys,0.71,"synth_ecp5 -top <module>; stat",CCU2C,48,48,0,Carry and arithmetic logic for counter incrementers
+fpga_ecp5,Lattice ECP5 85k,Yosys,0.71,"synth_ecp5 -top <module>; stat",Block RAM (DP16KD),0,0,0,0 BRAM inferred due to combinational read architecture
+timing,All Targets,nextpnr / STA,N/A,N/A,Max Frequency (Fmax),NOT MEASURED,NOT MEASURED,N/A,Unrouted out-of-context; requires vendor P&R (Vivado/Quartus) or BRAM wrapper
